@@ -4,19 +4,19 @@ One-time bootstrap. Run from the repo root. CI's `deploy` job only works
 once these steps are done.
 
 1. **Create the app** without deploying. The name in `fly.toml` must be
-   globally unique on Fly; change `app` there if `uncharles-agent` is taken.
+   globally unique on Fly; change `app` there if `chuck` is taken.
    Also check `primary_region`.
 
    ```sh
    fly auth login
-   fly apps create uncharles-agent
+   fly apps create chuck
    ```
 
 2. **Create the volume** in the same region as `primary_region`. Exactly one:
    the app runs on a single Machine and Litestream assumes one writer.
 
    ```sh
-   fly volumes create uncharles_data --app uncharles-agent --region iad --size 1
+   fly volumes create chuck_data --app chuck --region iad --size 1
    ```
 
 3. **Create the Tigris bucket.** This sets `BUCKET_NAME`, `AWS_ACCESS_KEY_ID`,
@@ -25,14 +25,14 @@ once these steps are done.
    `BUCKET_NAME`.
 
    ```sh
-   fly storage create --app uncharles-agent --name uncharles-agent-state
+   fly storage create --app chuck --name chuck-state
    ```
 
 4. **First deploy** by hand to confirm it comes up:
 
    ```sh
    make deploy
-   fly logs --app uncharles-agent   # expect "heartbeat" lines every minute
+   fly logs --app chuck   # expect "heartbeat" lines every minute
    ```
 
 5. **Hand deploys to CI.** Create a deploy token scoped to this app only and
@@ -41,7 +41,7 @@ once these steps are done.
    you want to approve each deploy.
 
    ```sh
-   fly tokens create deploy --app uncharles-agent --expiry 2160h
+   fly tokens create deploy --app chuck --expiry 2160h
    ```
 
 ## Phase 0 exit check
@@ -53,7 +53,7 @@ and its volume:
 fly ssh console -C "wget -qO- localhost:8080/healthz"        # note boot_count = N
 fly machine destroy <id> --force
 fly volumes destroy <vol-id>
-fly volumes create uncharles_data --region iad --size 1
+fly volumes create chuck_data --region iad --size 1
 fly deploy . --config deploy/fly.toml --dockerfile Dockerfile
 fly ssh console -C "wget -qO- localhost:8080/healthz"        # want boot_count = N+1
 ```

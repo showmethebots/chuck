@@ -1,14 +1,14 @@
-// Command uncharles is the autonomous project manager daemon.
+// Command chuck is the autonomous project manager daemon.
 //
-//	uncharles run       start the daemon (default)
-//	uncharles validate  load and validate config, then exit
+//	chuck run       start the daemon (default)
+//	chuck validate  load and validate config, then exit
 //
 // Environment:
 //
-//	UNCHARLES_CONFIG_DIR  directory holding routes.yaml and policy.yaml (default ./config)
-//	UNCHARLES_DB_PATH     SQLite state file (default ./data/uncharles.db)
-//	UNCHARLES_HEARTBEAT   heartbeat interval as a Go duration (default 1m)
-//	PORT                  HTTP listen port (default 8080)
+//	CHUCK_CONFIG_DIR  directory holding routes.yaml and policy.yaml (default ./config)
+//	CHUCK_DB_PATH     SQLite state file (default ./data/chuck.db)
+//	CHUCK_HEARTBEAT   heartbeat interval as a Go duration (default 1m)
+//	PORT              HTTP listen port (default 8080)
 package main
 
 import (
@@ -22,9 +22,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/orionsbelt-dev/uncharles-agent/internal/config"
-	"github.com/orionsbelt-dev/uncharles-agent/internal/daemon"
-	"github.com/orionsbelt-dev/uncharles-agent/internal/memory"
+	"github.com/orionsbelt-dev/chuck/internal/config"
+	"github.com/orionsbelt-dev/chuck/internal/daemon"
+	"github.com/orionsbelt-dev/chuck/internal/memory"
 )
 
 // version is set at build time with -ldflags "-X main.version=...".
@@ -41,8 +41,8 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout,
 	if len(args) > 0 {
 		cmd = args[0]
 	}
-	log := slog.New(slog.NewJSONHandler(stdout, nil)).With("app", "uncharles")
-	configDir := envOr(getenv, "UNCHARLES_CONFIG_DIR", "config")
+	log := slog.New(slog.NewJSONHandler(stdout, nil)).With("app", "chuck")
+	configDir := envOr(getenv, "CHUCK_CONFIG_DIR", "config")
 
 	switch cmd {
 	case "validate":
@@ -71,12 +71,12 @@ func runDaemon(ctx context.Context, log *slog.Logger, getenv func(string) string
 	}
 	log.Info("config loaded", "dir", configDir, "routes", len(cfg.Routes.Routes))
 
-	interval, err := time.ParseDuration(envOr(getenv, "UNCHARLES_HEARTBEAT", "1m"))
+	interval, err := time.ParseDuration(envOr(getenv, "CHUCK_HEARTBEAT", "1m"))
 	if err != nil {
-		return fmt.Errorf("UNCHARLES_HEARTBEAT: %w", err)
+		return fmt.Errorf("CHUCK_HEARTBEAT: %w", err)
 	}
 
-	dbPath := envOr(getenv, "UNCHARLES_DB_PATH", "data/uncharles.db")
+	dbPath := envOr(getenv, "CHUCK_DB_PATH", "data/chuck.db")
 	store, err := memory.Open(ctx, dbPath)
 	if err != nil {
 		return err

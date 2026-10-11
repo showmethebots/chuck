@@ -16,7 +16,7 @@ func env(m map[string]string) func(string) string {
 func TestValidateShippedConfig(t *testing.T) {
 	var out, errOut bytes.Buffer
 	code := run(context.Background(), []string{"validate"},
-		env(map[string]string{"UNCHARLES_CONFIG_DIR": "../../config"}), &out, &errOut)
+		env(map[string]string{"CHUCK_CONFIG_DIR": "../../config"}), &out, &errOut)
 	if code != 0 {
 		t.Fatalf("exit %d, stderr: %s", code, errOut.String())
 	}
@@ -36,7 +36,7 @@ func TestValidateReportsBadConfig(t *testing.T) {
 
 	var out, errOut bytes.Buffer
 	code := run(context.Background(), []string{"validate"},
-		env(map[string]string{"UNCHARLES_CONFIG_DIR": dir}), &out, &errOut)
+		env(map[string]string{"CHUCK_CONFIG_DIR": dir}), &out, &errOut)
 	if code != 1 {
 		t.Fatalf("exit %d, want 1", code)
 	}
@@ -57,8 +57,8 @@ func TestRunFailsFastOnBadConfig(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "state.db")
 	var out, errOut bytes.Buffer
 	code := run(context.Background(), []string{"run"}, env(map[string]string{
-		"UNCHARLES_CONFIG_DIR": t.TempDir(),
-		"UNCHARLES_DB_PATH":    dbPath,
+		"CHUCK_CONFIG_DIR": t.TempDir(),
+		"CHUCK_DB_PATH":    dbPath,
 	}), &out, &errOut)
 	if code != 1 {
 		t.Fatalf("exit %d, want 1", code)

@@ -33,7 +33,7 @@ conventions the code already depends on.
 
 ## Conventions
 
-- `cmd/uncharles` receives `getenv`, stdout and stderr as arguments so tests
+- `cmd/chuck` receives `getenv`, stdout and stderr as arguments so tests
   can drive it without the process environment. Keep that seam.
 - Every GitHub Action is pinned to a full commit SHA with the version in a
   trailing comment. To bump one, re-resolve the SHA for the new release.

@@ -1,4 +1,4 @@
-# uncharles-agent
+# chuck
 
 An always-on project manager agent on Fly.io. It picks up events, routes
 work across Haiku, Sonnet, Opus, and Clark, dispatches Claude Code workers,
@@ -13,7 +13,7 @@ actions yet.
 ## Layout
 
 ```
-cmd/uncharles/      entrypoint: `run` (daemon), `validate` (config check)
+cmd/chuck/          entrypoint: `run` (daemon), `validate` (config check)
 internal/config/    routes.yaml + policy.yaml loader and schema validation
 internal/memory/    SQLite state (WAL, embedded migrations)
 internal/daemon/    heartbeat loop and HTTP endpoints

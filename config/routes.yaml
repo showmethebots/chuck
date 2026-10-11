@@ -1,5 +1,5 @@
 # Routing rules. Rules decide escalation; the small model only dispatches.
-# Validated at startup and in CI by `uncharles validate`. Unknown keys fail.
+# Validated at startup and in CI by `chuck validate`. Unknown keys fail.
 #
 # match keys (all optional, but at least one of event, task, or action is
 # required; all given keys must match):

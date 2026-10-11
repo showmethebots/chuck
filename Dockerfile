@@ -11,7 +11,7 @@ COPY cmd ./cmd
 COPY internal ./internal
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=$TARGETARCH \
     go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" \
-    -o /out/uncharles ./cmd/uncharles
+    -o /out/chuck ./cmd/chuck
 
 FROM alpine:3.24 AS litestream
 ARG TARGETARCH
@@ -29,13 +29,13 @@ RUN set -eu; \
 
 FROM alpine:3.24
 RUN apk add --no-cache ca-certificates
-COPY --from=build /out/uncharles /usr/local/bin/uncharles
+COPY --from=build /out/chuck /usr/local/bin/chuck
 COPY --from=litestream /usr/local/bin/litestream /usr/local/bin/litestream
 COPY config /app/config
 COPY deploy/litestream.yml /etc/litestream.yml
 COPY deploy/entrypoint.sh /usr/local/bin/entrypoint.sh
-ENV UNCHARLES_CONFIG_DIR=/app/config \
-    UNCHARLES_DB_PATH=/data/uncharles.db \
+ENV CHUCK_CONFIG_DIR=/app/config \
+    CHUCK_DB_PATH=/data/chuck.db \
     PORT=8080
 EXPOSE 8080
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

@@ -1,4 +1,4 @@
-module github.com/orionsbelt-dev/uncharles-agent
+module github.com/orionsbelt-dev/chuck
 
 go 1.27.2
 
