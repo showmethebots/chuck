@@ -1,0 +1,11 @@
+# Litestream replicates the daemon's SQLite file to object storage.
+# Both variables are set by deploy/entrypoint.sh; on Fly the replica URL is
+# built from BUCKET_NAME, which `fly storage create` sets as a secret along
+# with AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY (read automatically).
+logging:
+  type: json
+
+dbs:
+  - path: ${UNCHARLES_DB_PATH}
+    replica:
+      url: ${LITESTREAM_REPLICA_URL}

@@ -1,0 +1,30 @@
+# Routing rules. Rules decide escalation; the small model only dispatches.
+# Validated at startup and in CI by `uncharles validate`. Unknown keys fail.
+#
+# match keys (all optional, but at least one of event, task, or action is
+# required; all given keys must match):
+#   event:    string or list (any of)
+#   task:     string or list (any of)
+#   action:   string or list (any of); each must be declared in policy.yaml
+#   attempts: comparison against the task's failure count: <N, <=N, >N, >=N, ==N
+# tier: haiku | sonnet | opus | human
+# Routes are evaluated top to bottom; first match wins.
+
+routes:
+  - match: {event: ci_failed, attempts: "<2"}
+    tier: sonnet
+  - match: {event: ci_failed, attempts: ">=2"}
+    tier: opus
+  - match: {task: plan_goal}
+    tier: opus
+  - match: {action: [merge, deploy, spend, send_external]}
+    tier: human
+  - match: {task: [triage, digest, notion_sync]}
+    tier: haiku
+
+# Unmatched events: Haiku classifies; anything it cannot confidently classify
+# goes up a tier. Any tier name is also accepted here.
+default: haiku_classify
+
+# Promote one tier after this many failures. Escalation is one-way per task.
+promote_after_failures: 2

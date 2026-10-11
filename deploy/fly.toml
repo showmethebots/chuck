@@ -1,0 +1,34 @@
+# Daemon app. Deploy from the repo root:
+#   fly deploy . --config deploy/fly.toml --dockerfile Dockerfile
+# Exactly one Machine: the SQLite volume is pinned to it and Litestream
+# assumes a single writer. Never scale this app above one.
+
+app = "uncharles-agent"
+primary_region = "iad"
+kill_signal = "SIGTERM"
+kill_timeout = "30s" # give Litestream time to flush on shutdown
+
+[env]
+  UNCHARLES_HEARTBEAT = "1m"
+
+[mounts]
+  source = "uncharles_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "off"
+  auto_start_machines = false
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    grace_period = "15s"
+    interval = "30s"
+    method = "GET"
+    path = "/healthz"
+    timeout = "5s"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"

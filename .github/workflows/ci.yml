@@ -1,0 +1,58 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# Every action is pinned to a commit SHA: the deploy job holds FLY_API_TOKEN
+# and every job checks out this repo. Bump by looking up the latest release
+# and re-resolving its SHA, not by editing the comment.
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - run: go vet ./...
+      - run: go test -race ./...
+      - name: Validate shipped config
+        run: go run ./cmd/uncharles validate
+      - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version: v2.14.0
+
+  images:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Build daemon image
+        run: docker build -t uncharles:ci --build-arg VERSION=${{ github.sha }} .
+      - name: Litestream restore check
+        run: deploy/smoke-restore.sh uncharles:ci
+      - name: Build worker image
+        run: docker build -f deploy/worker.Dockerfile -t uncharles-worker:ci .
+
+  deploy:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [test, images]
+    runs-on: ubuntu-latest
+    environment: production
+    concurrency:
+      group: fly-deploy
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # 1.6 is a stable tag without a GitHub release; the latest release (1.5)
+      # runs on node20, which hosted runners no longer support.
+      - uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1 # 1.6
+      - run: >-
+          flyctl deploy . --config deploy/fly.toml --dockerfile Dockerfile
+          --remote-only --build-arg VERSION=${{ github.sha }}
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
