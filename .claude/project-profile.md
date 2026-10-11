@@ -27,11 +27,11 @@ make smoke
 
 | Canonical | Restated in |
 | --- | --- |
-| `deploy/fly.toml` (app name, region, volume name, single Machine) | `deploy/README.md` bootstrap and exit-check commands (**followed against the Fly account**), `Makefile` `deploy`, `.github/workflows/ci.yml` deploy step |
+| `deploy/fly.toml` (app name, region, volume name, single Machine, and its location under `deploy/`) | `deploy/README.md` intro note and bootstrap and exit-check commands (**followed against the Fly account**), `AGENTS.md` conventions (`-c deploy/fly.toml`), `Makefile` `deploy`, `.github/workflows/ci.yml` deploy step, the `fly.toml` header comment |
 | `deploy/entrypoint.sh` / `deploy/litestream.yml` (replica URL, Tigris secrets) | `deploy/README.md` step 3 (**followed against the Fly account**) |
 | `deploy/smoke-restore.sh` | `deploy/README.md` "Phase 0 exit check" |
 | `internal/config/config.go` (validation rules) | `README.md` "Config", header comments in `config/routes.yaml` and `config/policy.yaml` |
-| `cmd/chuck/main.go` (env vars and defaults) | its package doc comment, `Dockerfile` `ENV`, `deploy/entrypoint.sh`, `deploy/fly.toml` `[env]`, `Makefile` `run` |
+| `cmd/chuck/main.go` (env vars and defaults) | its package doc comment, `Dockerfile` `ENV`, `deploy/entrypoint.sh`, `deploy/litestream.yml`, `deploy/smoke-restore.sh`, `deploy/fly.toml` `[env]`, `Makefile` `run` |
 | `Makefile` targets | `README.md` "Development", this profile's `## Mechanical checks` |
 | `.github/workflows/ci.yml` checks | this profile's `## Mechanical checks` |
 | Current phase | `README.md` status line, package comments in `internal/daemon/daemon.go`, `deploy/worker.Dockerfile`, `internal/memory/migrations/0001_boots.sql` |

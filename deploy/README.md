@@ -63,7 +63,7 @@ fly ssh console -c deploy/fly.toml -C "wget -qO- localhost:8080/healthz"   # wan
 ```
 
 `deploy/smoke-restore.sh` runs the same sequence locally and in CI, with a
-directory standing in for Tigris.
+Docker volume standing in for Tigris.
 
 ## Gotchas
 
