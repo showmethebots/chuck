@@ -41,3 +41,5 @@ conventions the code already depends on.
 - Values in `config/policy.yaml` marked `placeholder: not set in the design`
   are deliberate. They change when the design sets them.
 - A push to `main` deploys to production through the CI `deploy` job.
+- `fly.toml` is at `deploy/fly.toml`, not the repo root. Every app-scoped
+  `fly` command needs `-c deploy/fly.toml`.
