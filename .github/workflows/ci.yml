@@ -22,7 +22,7 @@ jobs:
       - run: go vet ./...
       - run: go test -race ./...
       - name: Validate shipped config
-        run: go run ./cmd/uncharles validate
+        run: go run ./cmd/chuck validate
       - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           version: v2.14.0
@@ -32,11 +32,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Build daemon image
-        run: docker build -t uncharles:ci --build-arg VERSION=${{ github.sha }} .
+        run: docker build -t chuck:ci --build-arg VERSION=${{ github.sha }} .
       - name: Litestream restore check
-        run: deploy/smoke-restore.sh uncharles:ci
+        run: deploy/smoke-restore.sh chuck:ci
       - name: Build worker image
-        run: docker build -f deploy/worker.Dockerfile -t uncharles-worker:ci .
+        run: docker build -f deploy/worker.Dockerfile -t chuck-worker:ci .
 
   deploy:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'

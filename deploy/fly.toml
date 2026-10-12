@@ -3,16 +3,16 @@
 # Exactly one Machine: the SQLite volume is pinned to it and Litestream
 # assumes a single writer. Never scale this app above one.
 
-app = "uncharles-agent"
+app = "chuck"
 primary_region = "iad"
 kill_signal = "SIGTERM"
 kill_timeout = "30s" # give Litestream time to flush on shutdown
 
 [env]
-  UNCHARLES_HEARTBEAT = "1m"
+  CHUCK_HEARTBEAT = "1m"
 
 [mounts]
-  source = "uncharles_data"
+  source = "chuck_data"
   destination = "/data"
 
 [http_service]

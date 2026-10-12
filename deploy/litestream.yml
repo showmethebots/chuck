@@ -6,6 +6,6 @@ logging:
   type: json
 
 dbs:
-  - path: ${UNCHARLES_DB_PATH}
+  - path: ${CHUCK_DB_PATH}
     replica:
       url: ${LITESTREAM_REPLICA_URL}

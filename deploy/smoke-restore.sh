@@ -6,17 +6,17 @@
 # A Docker volume stands in for Tigris (a volume, not a bind mount, so
 # root-owned replica files never land on the host).
 #
-# Usage: deploy/smoke-restore.sh [image]   (default uncharles:dev)
+# Usage: deploy/smoke-restore.sh [image]   (default chuck:dev)
 set -eu
 
-image=${1:-uncharles:dev}
-name=uncharles-smoke
+image=${1:-chuck:dev}
+name=chuck-smoke
 trap 'docker rm -f $name >/dev/null 2>&1 || true; docker volume rm -f ${name}-1 ${name}-2 ${name}-replica >/dev/null 2>&1 || true' EXIT
 
 boot() { # volume expected_count
 	docker run -d --name $name -v "$1:/data" -v ${name}-replica:/replica \
-		-e LITESTREAM_REPLICA_URL=file:///replica/uncharles \
-		-e UNCHARLES_HEARTBEAT=1s "$image" >/dev/null
+		-e LITESTREAM_REPLICA_URL=file:///replica/chuck \
+		-e CHUCK_HEARTBEAT=1s "$image" >/dev/null
 	got=""
 	for _ in $(seq 1 30); do
 		got=$(docker exec $name wget -qO- http://127.0.0.1:8080/healthz 2>/dev/null || true)

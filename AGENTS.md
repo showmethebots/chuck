@@ -33,7 +33,7 @@ conventions the code already depends on.
 
 ## Conventions
 
-- `cmd/uncharles` receives `getenv`, stdout and stderr as arguments so tests
+- `cmd/chuck` receives `getenv`, stdout and stderr as arguments so tests
   can drive it without the process environment. Keep that seam.
 - Every GitHub Action is pinned to a full commit SHA with the version in a
   trailing comment. To bump one, re-resolve the SHA for the new release.
@@ -41,3 +41,5 @@ conventions the code already depends on.
 - Values in `config/policy.yaml` marked `placeholder: not set in the design`
   are deliberate. They change when the design sets them.
 - A push to `main` deploys to production through the CI `deploy` job.
+- `fly.toml` is at `deploy/fly.toml`, not the repo root. Every app-scoped
+  `fly` command needs `-c deploy/fly.toml`.

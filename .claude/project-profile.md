@@ -8,7 +8,7 @@ the repo.
 
 ## Repo
 
-`orionsbelt-dev/uncharles-agent`, private. Collaborators: `cwinters8` (Clark,
+`orionsbelt-dev/chuck`, private. Collaborators: `cwinters8` (Clark,
 maintainer) and `etho201` (Erik Thomsen, a human account). There are two
 possible reactors, so review-sweep must require an `APPROVED` review and must
 not infer approval from reaction counts.
@@ -27,11 +27,11 @@ make smoke
 
 | Canonical | Restated in |
 | --- | --- |
-| `deploy/fly.toml` (app name, region, volume name, single Machine) | `deploy/README.md` bootstrap and exit-check commands (**followed against the Fly account**), `Makefile` `deploy`, `.github/workflows/ci.yml` deploy step |
+| `deploy/fly.toml` (app name, region, volume name, single Machine, and its location under `deploy/`) | `deploy/README.md` intro note and bootstrap and exit-check commands (**followed against the Fly account**), `AGENTS.md` conventions (`-c deploy/fly.toml`), `Makefile` `deploy`, `.github/workflows/ci.yml` deploy step, the `fly.toml` header comment |
 | `deploy/entrypoint.sh` / `deploy/litestream.yml` (replica URL, Tigris secrets) | `deploy/README.md` step 3 (**followed against the Fly account**) |
 | `deploy/smoke-restore.sh` | `deploy/README.md` "Phase 0 exit check" |
 | `internal/config/config.go` (validation rules) | `README.md` "Config", header comments in `config/routes.yaml` and `config/policy.yaml` |
-| `cmd/uncharles/main.go` (env vars and defaults) | its package doc comment, `Dockerfile` `ENV`, `deploy/entrypoint.sh`, `deploy/fly.toml` `[env]`, `Makefile` `run` |
+| `cmd/chuck/main.go` (env vars and defaults) | its package doc comment, `Dockerfile` `ENV`, `deploy/entrypoint.sh`, `deploy/litestream.yml`, `deploy/smoke-restore.sh`, `deploy/fly.toml` `[env]`, `Makefile` `run` |
 | `Makefile` targets | `README.md` "Development", this profile's `## Mechanical checks` |
 | `.github/workflows/ci.yml` checks | this profile's `## Mechanical checks` |
 | Current phase | `README.md` status line, package comments in `internal/daemon/daemon.go`, `deploy/worker.Dockerfile`, `internal/memory/migrations/0001_boots.sql` |
@@ -95,7 +95,7 @@ to `main` deploys to production through the `production` environment.
 
 ## Threat model
 
-The repo ships a container image to a single Fly Machine (`uncharles-agent`).
+The repo ships a container image to a single Fly Machine (`chuck`).
 Its only inbound surface is an unauthenticated `GET /healthz` behind Fly's
 HTTPS proxy, which returns the version and boot count. What matters is the
 Fly app, its volume, and the Tigris bucket holding the replicated state. The
@@ -159,5 +159,5 @@ non-secret settings only. Never commit a secret, a `.db` file or `data/`.
 
 ## Release targets
 
-Fly.io app `uncharles-agent`, deployed by the CI `deploy` job on push to
+Fly.io app `chuck`, deployed by the CI `deploy` job on push to
 `main`. The worker image is built in CI but not published.

@@ -1,5 +1,5 @@
 # Permission tiers, budgets, and caps. Validated at startup and in CI by
-# `uncharles validate`. Unknown keys fail. An action may appear in only one
+# `chuck validate`. Unknown keys fail. An action may appear in only one
 # permission tier, and any route that matches an ask_first action must route
 # to the human tier.
 
