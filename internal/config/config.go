@@ -1,4 +1,8 @@
-// Package config loads and validates the agent's YAML configuration: config/routes.yaml (routing rules), config/policy.yaml (permission tiers, budgets, caps), and the optional config/slack.yaml (who chuck listens to on Slack).
+// Package config loads and validates the agent's YAML configuration:
+// config/routes.yaml (routing rules), config/policy.yaml (permission
+// tiers, budgets, caps), and the optional config/slack.yaml (who chuck
+// listens to on Slack). Decoding is strict: unknown keys are errors, so a
+// typo cannot silently disable a rule.
 package config
 
 import (
@@ -240,8 +244,9 @@ func (p Permissions) byTier() map[Permission][]string {
 	}
 }
 
-// Load reads routes.yaml and policy.yaml from dir and validates them,
-// reporting every problem found rather than stopping at the first.
+// Load reads routes.yaml, policy.yaml and, if present, slack.yaml from dir
+// and validates them, reporting every problem found rather than stopping at
+// the first.
 func Load(dir string) (*Config, error) {
 	var cfg Config
 	if err := decodeFile(filepath.Join(dir, RoutesFile), &cfg.Routes); err != nil {
