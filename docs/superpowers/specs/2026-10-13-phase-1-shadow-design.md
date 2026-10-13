@@ -111,7 +111,10 @@ jobs, both daily at `CHUCK_DAILY_AT` (UTC `HH:MM`, default `13:00`):
   triage failures, whether chuck is paused.
 
 Each tick is stored in `events` with `source = cron` so it appears in the log
-and in replay, but ticks bypass Haiku.
+and in replay, but ticks bypass Haiku. Cron jobs run while chuck is paused:
+the summary still posts and reports who paused it and since when, so a pause
+never silently stops reporting. Grade posts the sample queues wait in the
+outbox like any other post.
 
 ### `internal/triage`
 
@@ -124,7 +127,8 @@ gradeable. Initial rules:
 - `issue_comment`, `pull_request_review_comment` with action `edited` or `deleted`
 - `pull_request` with action `labeled`, `unlabeled`, `assigned`, `unassigned`,
   `review_request_removed`, `edited`
-- `installation`, `installation_repositories` (recorded, never triaged)
+- `installation`, `installation_repositories`, `ping` (recorded, never
+  triaged; GitHub sends `ping` when the App's webhook is created or edited)
 
 **Classifier** is an interface:
 
@@ -362,7 +366,8 @@ Slack handling, using Clark's account and the second account:
    nothing; `messages` shows `allowed = 0`.
 3. Add second account as member by PR, deploy: `status`, `pause` work;
    `resume` is refused; Approve on a shadow approval works; grade buttons are
-   refused.
+   refused. To get an approval post on demand, open a PR on `demos`, approve
+   it, and let CI pass; triage should propose `merge`.
 4. Owner `resume` works.
 5. `pause`, redeploy, `status` still shows paused.
 6. A test event on `demos` produces a grade post within a minute.
@@ -392,11 +397,16 @@ measurable terms. All must hold:
 1. 7 consecutive days running in production unpaused except by deliberate
    test.
 2. At least 100 graded decisions.
-3. At least 90% 👍 overall.
+3. At least 90% 👍 of graded decisions.
 4. Zero 👎 on decisions whose would-do is in `ask_first`.
-5. Zero allowlist violations: no inbound interaction from a user lacking the
-   required role had any effect.
-6. A real-Haiku `replay` at the end has at least 90% 👍 agreement.
+5. Zero allowlist violations: no `messages` row with `allowed = 0` whose
+   interaction changed state.
+6. A real-Haiku `replay` using the prompt and rules as they stand at the end
+   of the week, run against every grade collected during it, has at least 90%
+   👍 agreement. Replaying an unchanged prompt would only measure
+   nondeterminism; the point is that the prompt will be tuned as grades come
+   in, and the final version must still agree with grades given to earlier
+   versions.
 
 The daily summary reports progress on 2–4.
 
