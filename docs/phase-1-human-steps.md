@@ -77,3 +77,4 @@ Only needed to run chuck on your laptop against real GitHub traffic.
    then paste the printed `https://….trycloudflare.com/webhooks/github` URL
    into the dev App's Webhook URL. The URL changes every time the tunnel
    restarts.
+4. Run chuck with your `.env` loaded: `set -a; . ./.env; set +a; make run`
