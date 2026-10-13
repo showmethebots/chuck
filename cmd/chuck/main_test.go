@@ -67,3 +67,17 @@ func TestRunFailsFastOnBadConfig(t *testing.T) {
 		t.Fatalf("database was created despite invalid config")
 	}
 }
+
+func TestLoadIntegrations(t *testing.T) {
+	in, err := loadIntegrations(env(nil))
+	if err != nil || len(in.names()) != 0 {
+		t.Fatalf("no env: %v, names %v; want none", err, in.names())
+	}
+	in, err = loadIntegrations(env(map[string]string{"GITHUB_APP_WEBHOOK_SECRET": "s"}))
+	if err != nil || in.WebhookSecret != "s" {
+		t.Fatalf("secret: %+v, %v", in, err)
+	}
+	if got := in.names(); len(got) != 1 || got[0] != "github_webhook" {
+		t.Fatalf("names = %v", got)
+	}
+}
