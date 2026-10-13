@@ -97,7 +97,7 @@ func TestBuildInputTruncatesOnRuneBoundary(t *testing.T) {
 func TestBuildInputAgentMarker(t *testing.T) {
 	const marker = "\n\n<!-- agent: review-sweep -->"
 	comment := func(login, body string) []byte {
-		return []byte(`{"action":"created","comment":{"body":` + strconv.Quote(body) + `},` +
+		return []byte(`{"action":"created","comment":{"body":` + strconv.Quote(body) + `,"user":{"login":"` + login + `"}},` +
 			`"issue":{"title":"t","html_url":"https://github.com/o/r/issues/1"},` +
 			`"sender":{"login":"` + login + `","type":"User"}}`)
 	}
@@ -121,15 +121,32 @@ func TestBuildInputAgentMarker(t *testing.T) {
 	}
 
 	// The marker counts in a review body and an issue body too.
-	review := []byte(`{"action":"submitted","review":{"state":"commented","body":"LGTM` + `<!-- agent: code-review -->"},` +
+	review := []byte(`{"action":"submitted","review":{"state":"commented","body":"LGTM` + `<!-- agent: code-review -->","user":{"login":"cwinters8"}},` +
 		`"pull_request":{"title":"t","html_url":"https://github.com/o/r/pull/2"},"sender":{"login":"cwinters8","type":"User"}}`)
-	issue := []byte(`{"action":"opened","issue":{"title":"t","body":"Found while sweeping.<!-- agent: review-sweep -->","html_url":"https://github.com/o/r/issues/3"},` +
+	issue := []byte(`{"action":"opened","issue":{"title":"t","body":"Found while sweeping.<!-- agent: review-sweep -->","html_url":"https://github.com/o/r/issues/3","user":{"login":"cwinters8"}},` +
 		`"sender":{"login":"cwinters8","type":"User"}}`)
 	for kind, payload := range map[string][]byte{"pull_request_review.submitted": review, "issues.opened": issue} {
 		got, err := BuildInput(kind, "o/r", payload)
 		if err != nil || got.ActorType != ActorAgent {
 			t.Errorf("%s: ActorType = %q, %v; want Agent", kind, got.ActorType, err)
 		}
+	}
+
+	// The fix: sender triggering the event is different from the author of the text.
+	// issues.labeled with sender cwinters8 but issue.user someone-else → "User"
+	labeledPayload := []byte(`{"action":"labeled","issue":{"title":"t","body":"Found bug.<!-- agent: review-sweep -->","html_url":"https://github.com/o/r/issues/4","user":{"login":"someone-else"}},` +
+		`"sender":{"login":"cwinters8","type":"User"}}`)
+	got, err := BuildInput("issues.labeled", "o/r", labeledPayload)
+	if err != nil || got.ActorType != "User" {
+		t.Errorf("issues.labeled: ActorType = %q, %v; want User", got.ActorType, err)
+	}
+
+	// pull_request_review.dismissed with sender cwinters8 but review.user someone-else → "User"
+	dismissedPayload := []byte(`{"action":"dismissed","review":{"state":"commented","body":"Dismissed.<!-- agent: code-review -->","user":{"login":"someone-else"}},` +
+		`"pull_request":{"title":"t","html_url":"https://github.com/o/r/pull/5"},"sender":{"login":"cwinters8","type":"User"}}`)
+	got, err = BuildInput("pull_request_review.dismissed", "o/r", dismissedPayload)
+	if err != nil || got.ActorType != "User" {
+		t.Errorf("pull_request_review.dismissed: ActorType = %q, %v; want User", got.ActorType, err)
 	}
 }
 

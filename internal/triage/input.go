@@ -32,10 +32,14 @@ type Input struct {
 	Repo      string
 	Kind      string
 	Actor     string
-	ActorType string // "User" or "Bot"
+	ActorType string // "User", "Bot", or ActorAgent
 	Title     string
 	URL       string
 	Text      string
+}
+
+type ghUser struct {
+	Login string `json:"login"`
 }
 
 type ghItem struct {
@@ -43,6 +47,7 @@ type ghItem struct {
 	Body    string `json:"body"`
 	HTMLURL string `json:"html_url"`
 	Merged  bool   `json:"merged"`
+	User    ghUser `json:"user"`
 }
 
 type ghPayload struct {
@@ -55,10 +60,12 @@ type ghPayload struct {
 	Comment     *struct {
 		Body string `json:"body"`
 		Path string `json:"path"`
+		User ghUser `json:"user"`
 	} `json:"comment"`
 	Review *struct {
 		State string `json:"state"`
 		Body  string `json:"body"`
+		User  ghUser `json:"user"`
 	} `json:"review"`
 	WorkflowRun *struct {
 		Name       string `json:"name"`
@@ -88,13 +95,15 @@ func BuildInput(kind, repo string, payload []byte) (Input, error) {
 		in.Title, in.URL = item.Title, item.HTMLURL
 	}
 
-	var text, authored string // authored: what the sender wrote for this event
+	var text, authored, author string // authored: what the sender wrote for this event; author: who wrote it
 	switch {
 	case p.Review != nil:
 		authored = p.Review.Body
+		author = p.Review.User.Login
 		text = fmt.Sprintf("review %s:\n%s", p.Review.State, p.Review.Body)
 	case p.Comment != nil:
 		authored = p.Comment.Body
+		author = p.Comment.User.Login
 		text = p.Comment.Body
 		if p.Comment.Path != "" {
 			text = fmt.Sprintf("on %s:\n%s", p.Comment.Path, text)
@@ -115,12 +124,13 @@ func BuildInput(kind, repo string, payload []byte) (Input, error) {
 		in.URL = p.Compare
 	case item != nil:
 		authored = item.Body
+		author = item.User.Login
 		text = item.Body
 		if item.Merged {
 			text = "(merged)\n" + text
 		}
 	}
-	if slices.Contains(agentMarkerAuthors, p.Sender.Login) && agentMarker.MatchString(authored) {
+	if slices.Contains(agentMarkerAuthors, author) && agentMarker.MatchString(authored) {
 		in.ActorType = ActorAgent
 	}
 	in.Text = truncate(text, MaxText)
