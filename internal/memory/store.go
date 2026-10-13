@@ -122,4 +122,12 @@ func (s *Store) RecordBoot(ctx context.Context, version string) (int64, error) {
 	return n, err
 }
 
-func now() string { return time.Now().UTC().Format(time.RFC3339Nano) }
+// tsFormat is fixed-width so timestamps sort correctly as text. RFC3339Nano
+// trims trailing zeros, so "…:05Z" would sort after "…:05.1Z".
+const tsFormat = "2006-01-02T15:04:05.000000Z"
+
+func ts(t time.Time) string { return t.UTC().Format(tsFormat) }
+
+func parseTS(s string) (time.Time, error) { return time.Parse(tsFormat, s) }
+
+func now() string { return ts(time.Now()) }
