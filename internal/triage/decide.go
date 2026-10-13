@@ -41,11 +41,13 @@ func Decide(ctx context.Context, kind, repo string, payload []byte, c Classifier
 	if err != nil {
 		return v, fmt.Errorf("classify: %w", err)
 	}
+	v.RawOutput, v.Usage = raw, u
 	cost, err := CostUSD(u)
 	if err != nil {
-		return v, err
+		v.Outcome, v.Rationale = memory.OutcomeFailed, "cost: "+err.Error()
+		return v, nil
 	}
-	v.RawOutput, v.Usage, v.CostUSD = raw, u, cost
+	v.CostUSD = cost
 	r, perm, err := ParseResult(raw, p)
 	if err != nil {
 		v.Outcome, v.Rationale = memory.OutcomeFailed, "output: "+err.Error()

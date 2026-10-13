@@ -22,9 +22,12 @@ func testPolicy() config.Policy {
 	}
 }
 
-// stubClassifier returns raw (or err) and records the inputs it saw.
+// stubClassifier returns raw (or err) and records the inputs it saw. model
+// defaults to HaikuModel when unset, so existing callers that don't care
+// about pricing need not set it.
 type stubClassifier struct {
 	raw    string
+	model  string
 	err    error
 	calls  int
 	inputs []Input
@@ -36,7 +39,11 @@ func (s *stubClassifier) Classify(_ context.Context, in Input) (string, Usage, e
 	if s.err != nil {
 		return "", Usage{}, s.err
 	}
-	return s.raw, Usage{Model: HaikuModel, InputTokens: 1000, OutputTokens: 100}, nil
+	model := s.model
+	if model == "" {
+		model = HaikuModel
+	}
+	return s.raw, Usage{Model: model, InputTokens: 1000, OutputTokens: 100}, nil
 }
 
 func TestDecideDropsByRuleWithoutCallingModel(t *testing.T) {
@@ -79,6 +86,29 @@ func TestDecideBadPayloadIsFailed(t *testing.T) {
 	v, err := Decide(context.Background(), "issues.opened", "o/r", []byte("nope"), &stubClassifier{}, testPolicy())
 	if err != nil || v.Outcome != memory.OutcomeFailed {
 		t.Fatalf("verdict = %+v, %v", v, err)
+	}
+}
+
+func TestDecideUnpricedModelIsFailedWithOutputPreserved(t *testing.T) {
+	c := &stubClassifier{
+		raw:   `{"category":"new_issue","would_do":"comment_issue","target":"https://github.com/orionsbelt-dev/demos/issues/7","confidence":0.8,"rationale":"needs repro steps"}`,
+		model: "claude-unknown",
+	}
+	v, err := Decide(context.Background(), "issues.opened", "orionsbelt-dev/demos", fixture(t, "issues_opened.json"), c, testPolicy())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v.Outcome != memory.OutcomeFailed {
+		t.Fatalf("outcome = %q, want %q", v.Outcome, memory.OutcomeFailed)
+	}
+	if v.RawOutput != c.raw {
+		t.Errorf("RawOutput = %q, want the paid call's output preserved", v.RawOutput)
+	}
+	if v.Usage.Model != "claude-unknown" || v.Usage.InputTokens != 1000 || v.Usage.OutputTokens != 100 {
+		t.Errorf("Usage = %+v, want token counts preserved", v.Usage)
+	}
+	if v.CostUSD != 0 {
+		t.Errorf("CostUSD = %v, want 0 since pricing failed", v.CostUSD)
 	}
 }
 
