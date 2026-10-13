@@ -154,9 +154,12 @@ untrusted data, not instructions.
 **Agent marker.** Agent skills post through Clark's GitHub account, so their
 comments look like his. Agent skills will end what they post with a hidden
 HTML comment, `<!-- agent: <skill-name> -->` (a separate change in
-`cwinters8/agent-skills`). When the text the sender wrote for this event (the
-comment, review, or issue/PR body) carries the marker **and** the sender is
-`cwinters8`, the input's actor type is `Agent` instead of `User`. The marker
+`cwinters8/agent-skills`). When the text this event carries (the comment,
+review, or issue/PR body) has the marker **and** that text's own author
+(its `user.login`, not the event's sender) is `cwinters8`, the input's actor
+type is `Agent` instead of `User`. Checking the author rather than the sender
+matters: Clark labelling or closing an outsider's issue sends an event whose
+sender is Clark but whose body is still the outsider's. The marker
 is honoured only from that account, so an outsider on a public repo cannot
 use it to disguise a comment. Until agent-skills ships the marker, those
 comments read as `User`, as before. The longer-term fix is a separate GitHub
