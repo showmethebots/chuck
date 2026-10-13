@@ -300,7 +300,10 @@ calls; everything triage uses is in the webhook payload.
 
 ## External setup
 
-Detailed steps go in `deploy/README.md` as part of implementation.
+Every manual step Clark takes in this phase goes in `docs/phase-1-human-steps.md`,
+not in a README, written as implementation reaches the point where each step
+is needed. Each step is announced to Clark when the code it depends on is
+ready, not before.
 
 - **GitHub App `chuck`**: webhook URL `https://chuck.fly.dev/webhooks/github`,
   webhook secret set. Read-only permissions: Metadata, Contents, Issues, Pull
