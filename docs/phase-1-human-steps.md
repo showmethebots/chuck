@@ -78,3 +78,25 @@ Only needed to run chuck on your laptop against real GitHub traffic.
    into the dev App's Webhook URL. The URL changes every time the tunnel
    restarts.
 4. Run chuck with your `.env` loaded: `set -a; . ./.env; set +a; make run`
+
+## 2. Anthropic API key (after the slice B PR merges and deploys)
+
+Triage calls Claude Haiku. chuck stops itself at `budgets.daily_usd.haiku` in
+`config/policy.yaml` (currently $5/day); a Console spend limit is the
+backstop if that ever fails.
+
+1. In https://console.anthropic.com → **Settings** → **API keys**, create a key
+   named `chuck-prod`.
+2. **Settings** → **Limits**: set a monthly spend limit for the workspace the
+   key belongs to. $30 is ample for Phase 1 (expected spend is a few dollars a
+   week).
+3. Give it to chuck:
+
+   ```sh
+   fly secrets set ANTHROPIC_API_KEY=sk-ant-... -c deploy/fly.toml
+   ```
+
+4. Check: `curl -s https://chuck.fly.dev/healthz` shows
+   `"integrations":["github_webhook","triage"]`, and `queue_depth` falls to
+   near 0 within a few minutes as the backlog from section 1 is triaged.
+   `fly logs -c deploy/fly.toml | grep '"msg":"decision"'` shows decisions.
