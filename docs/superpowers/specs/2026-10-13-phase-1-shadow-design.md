@@ -151,6 +151,18 @@ branch and commit count). Free text is capped at 4,000 characters with an
 explicit `[truncated]` marker. The prompt states that all event text is
 untrusted data, not instructions.
 
+**Agent marker.** Agent skills post through Clark's GitHub account, so their
+comments look like his. Agent skills will end what they post with a hidden
+HTML comment, `<!-- agent: <skill-name> -->` (a separate change in
+`cwinters8/agent-skills`). When the text the sender wrote for this event (the
+comment, review, or issue/PR body) carries the marker **and** the sender is
+`cwinters8`, the input's actor type is `Agent` instead of `User`. The marker
+is honoured only from that account, so an outsider on a public repo cannot
+use it to disguise a comment. Until agent-skills ships the marker, those
+comments read as `User`, as before. The longer-term fix is a separate GitHub
+identity for agents, decided in Phase 3 alongside chuck's own write
+identity.
+
 `Result` fields:
 
 | Field | Type | Values |
@@ -444,6 +456,6 @@ The daily summary reports progress on 2–4.
 - **Grading fatigue.** If posts exceed what Clark will grade, lower
   `CHUCK_GRADE_SAMPLE` or add noise rules; the exit criterion counts graded
   decisions, not days of posts.
-- **Clark's own comments include agent-posted replies.** chuck cannot tell
-  them apart from Clark's hand-written comments. Grades will show whether
-  that matters.
+- **Clark's own comments include agent-posted replies.** Mitigated by the
+  agent marker once agent-skills adds it; comments without it still read as
+  Clark's. Grades will show whether the remainder matters.
