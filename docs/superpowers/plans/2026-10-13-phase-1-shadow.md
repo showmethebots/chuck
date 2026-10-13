@@ -3999,6 +3999,7 @@ func seedDecision(t *testing.T, s *memory.Store, d memory.Decision) int64 {
 package notify
 
 import (
+	"bytes"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -4006,13 +4007,17 @@ import (
 	"github.com/orionsbelt-dev/chuck/internal/memory"
 )
 
+// render encodes blocks without HTML escaping, so "<@U…>" mentions appear
+// as Slack will receive them rather than as \u003c…\u003e.
 func render(t *testing.T, v memory.DecisionView) string {
 	t.Helper()
-	b, err := json.Marshal(DecisionBlocks(v))
-	if err != nil {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(DecisionBlocks(v)); err != nil {
 		t.Fatal(err)
 	}
-	return string(b)
+	return buf.String()
 }
 
 func view(d memory.Decision) memory.DecisionView {
@@ -5352,7 +5357,7 @@ git commit -m "Connect to Slack over Socket Mode behind the allowlist"
 - Consumes: `memory.Store` methods `InsertEvent`, `SampleQuiet`, `QueueGradePosts`, `Control`, `PendingPosts`, `RecordGrade`; `notify.Poster`; `daemon.Triage.OnBudgetHit`; test helpers `addEvent`, `discardLog`, `issueFixture` from `internal/daemon/triage_test.go`.
 - Produces:
   - `type events.Daily struct`, `func events.ParseDaily(at string) (Daily, error)`, `func (d Daily) Next(t time.Time) time.Time`, `func events.RunDaily(ctx, d Daily, now func() time.Time, f func(ctx context.Context, at time.Time))`
-  - `type memory.Summary struct { Since, Until time.Time; Outcomes, Categories map[string]int; SpendUSD float64; GradedInWindow, Graded, Up, AskFirstDown, PendingGrades int }`, `func (s *Store) Summary(ctx, since, until time.Time) (Summary, error)`
+  - `type memory.Summary struct { Since, Until time.Time; Outcomes, Categories map[string]int; SpendUSD float64; GradedInWindow, Graded, Up, AskFirstDown, PendingGrades, Rejected, Violations int }`, `func (s *Store) Summary(ctx, since, until time.Time) (Summary, error)`
   - `func notify.SummaryText(sum memory.Summary, ctl memory.Control, haikuBudget float64, diskUsed, diskTotal uint64) string`, `func notify.BudgetText(spent, budget float64) string`
   - `type daemon.DailyJobs struct { Store JobStore; Poster notify.Poster; MainChannel string; Sample int; HaikuBudget float64; Disk func() (used, total uint64, err error); Log *slog.Logger }`, `func (j *DailyJobs) Run(ctx context.Context, at time.Time) error`, `func daemon.DiskUsage(path string) (used, total uint64, err error)`
   - `integrations.Daily events.Daily`, `integrations.GradeSample int`
@@ -5538,6 +5543,26 @@ func TestSummary(t *testing.T) {
 			sum.GradedInWindow, sum.Graded, sum.Up, sum.AskFirstDown, sum.PendingGrades)
 	}
 }
+
+func TestSummaryAllowlistCounts(t *testing.T) {
+	ctx := context.Background()
+	s := openTemp(t, filepath.Join(t.TempDir(), "state.db"))
+	defer func() { _ = s.Close() }()
+	for _, m := range []Message{
+		{Direction: "in", Kind: "command", Text: "/chuck pause", User: "USTRANGE01", CreatedAt: t0},
+		{Direction: "in", Kind: "button", Text: "grade_up:1", User: "UMEMBER001", CreatedAt: t0},
+		{Direction: "in", Kind: "command", Text: "/chuck pause", User: "UMEMBER001", Allowed: true, ChangedState: true, CreatedAt: t0},
+		{Direction: "out", Kind: "post", Text: "posted", Allowed: true, CreatedAt: t0},
+	} {
+		if err := s.RecordMessage(ctx, m); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sum, err := s.Summary(ctx, t0.Add(-time.Hour), t0.Add(time.Hour))
+	if err != nil || sum.Rejected != 2 || sum.Violations != 0 {
+		t.Fatalf("rejected %d violations %d, %v; want 2 and 0", sum.Rejected, sum.Violations, err)
+	}
+}
 ```
 
 Run: `go test ./internal/memory/ -run TestSummary -v` — expect `undefined: Summary`.
@@ -5564,6 +5589,8 @@ type Summary struct {
 	Up             int            // of those, latest grade 👍
 	AskFirstDown   int            // ask_first decisions whose latest grade is 👎
 	PendingGrades  int            // posted for grading, never graded
+	Rejected       int            // inbound Slack interactions refused by the allowlist, all time
+	Violations     int            // refused interactions that changed state anyway; must stay 0
 }
 
 func (s *Store) countBy(ctx context.Context, query string, args ...any) (map[string]int, error) {
@@ -5615,8 +5642,12 @@ func (s *Store) Summary(ctx context.Context, since, until time.Time) (Summary, e
 		FROM latest JOIN decisions d ON d.id = latest.decision_id`).Scan(&sum.Graded, &sum.Up, &sum.AskFirstDown); err != nil {
 		return sum, err
 	}
-	err = s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM decisions d
-		WHERE d.post_kind IS NOT NULL AND NOT EXISTS (SELECT 1 FROM grades g WHERE g.decision_id = d.id)`).Scan(&sum.PendingGrades)
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM decisions d
+		WHERE d.post_kind IS NOT NULL AND NOT EXISTS (SELECT 1 FROM grades g WHERE g.decision_id = d.id)`).Scan(&sum.PendingGrades); err != nil {
+		return sum, err
+	}
+	err = s.db.QueryRowContext(ctx, `SELECT COUNT(*), COALESCE(SUM(changed_state), 0) FROM messages
+		WHERE direction = 'in' AND allowed = 0`).Scan(&sum.Rejected, &sum.Violations)
 	return sum, err
 }
 ```
@@ -5644,6 +5675,7 @@ func TestSummaryText(t *testing.T) {
 		Outcomes:   map[string]int{"ok": 80, "dropped_by_rule": 35, "triage_failed": 5},
 		Categories: map[string]int{"noise": 50, "ci_failure": 4},
 		SpendUSD:   0.21, GradedInWindow: 14, Graded: 63, Up: 58, AskFirstDown: 0, PendingGrades: 9,
+		Rejected: 3,
 	}
 	got := SummaryText(sum, memory.Control{}, 5, 120<<20, 1<<30)
 	for _, want := range []string{
@@ -5653,6 +5685,7 @@ func TestSummaryText(t *testing.T) {
 		"Haiku: $0.21 of $5.00 a day",
 		"Grades: 14 given, 9 waiting",
 		"Exit progress: 63/100 graded · 92% 👍 · 0 👎 on ask_first",
+		"Allowlist: 3 rejected, 0 violations",
 		"Disk: 120 MB of 1024 MB (11%)",
 	} {
 		if !strings.Contains(got, want) {
@@ -5735,6 +5768,7 @@ func SummaryText(sum memory.Summary, ctl memory.Control, haikuBudget float64, di
 		rate = fmt.Sprintf("%d%% 👍", sum.Up*100/sum.Graded)
 	}
 	fmt.Fprintf(&b, "Exit progress: %d/%d graded · %s · %d 👎 on ask_first\n", sum.Graded, exitGraded, rate, sum.AskFirstDown)
+	fmt.Fprintf(&b, "Allowlist: %d rejected, %d violations\n", sum.Rejected, sum.Violations)
 	if diskTotal > 0 {
 		pct := diskUsed * 100 / diskTotal
 		fmt.Fprintf(&b, "Disk: %d MB of %d MB (%d%%)", diskUsed>>20, diskTotal>>20, pct)
@@ -6343,11 +6377,11 @@ func (r ReplayReport) String() string {
 	}
 	sort.Strings(keys)
 	tw := tabwriter.NewWriter(&b, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "category\tup\tagree\tdown\tdiverge")
+	_, _ = fmt.Fprintln(tw, "category\tup\tagree\tdown\tdiverge")
 	var total ReplayRow
 	for _, k := range keys {
 		row := r.Rows[k]
-		fmt.Fprintf(tw, "%s\t%d\t%s\t%d\t%s\n", k, row.Up, pct(row.UpAgree, row.Up), row.Down, pct(row.DownDiverge, row.Down))
+		_, _ = fmt.Fprintf(tw, "%s\t%d\t%s\t%d\t%s\n", k, row.Up, pct(row.UpAgree, row.Up), row.Down, pct(row.DownDiverge, row.Down))
 		total.Up += row.Up
 		total.UpAgree += row.UpAgree
 		total.Down += row.Down
@@ -6651,13 +6685,12 @@ The week starts once the checklist passes.
   the live database (read-only):
 
   ```sh
-  fly ssh console -c deploy/fly.toml -C "chuck replay --db /data/chuck.db"
+  fly ssh console -c deploy/fly.toml -C "env CHUCK_CONFIG_DIR=/app/config chuck replay --db /data/chuck.db"
   ```
 
   Exit needs, together: 7 days running, at least 100 graded, at least 90%
-  👍, zero 👎 on `ask_first` proposals, no allowlist violations, and the
-  replay's `👍 agreement` at least 90%. The chuck session checks the
-  allowlist condition from the `messages` table.
+  👍, zero 👎 on `ask_first` proposals, `0 violations` on the daily
+  summary's Allowlist line, and the replay's `👍 agreement` at least 90%.
 ````
 
 - [ ] **Step 3: Update `README.md`**
