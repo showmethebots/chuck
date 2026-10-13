@@ -59,3 +59,23 @@ func (s *Store) CreateApproval(ctx context.Context, decisionID int64, request st
 		ON CONFLICT (decision_id) DO NOTHING`, decisionID, request)
 	return err
 }
+
+// RecordGrade stores the owner's grade for a decision. The latest grade
+// counts; earlier ones stay as history.
+func (s *Store) RecordGrade(ctx context.Context, decisionID int64, grade, user string, at time.Time) error {
+	_, err := s.db.ExecContext(ctx, `INSERT INTO grades (decision_id, grade, slack_user, graded_at)
+		VALUES (?, ?, ?, ?)`, decisionID, grade, user, ts(at))
+	return err
+}
+
+// RespondApproval records the answer to an approval request. Only the first
+// answer counts: it returns false if the request was already answered.
+func (s *Store) RespondApproval(ctx context.Context, decisionID int64, response, user string, at time.Time) (bool, error) {
+	res, err := s.db.ExecContext(ctx, `UPDATE approvals SET response = ?, responder_slack_user = ?, responded_at = ?
+		WHERE decision_id = ? AND response IS NULL`, response, user, ts(at), decisionID)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n == 1, err
+}
