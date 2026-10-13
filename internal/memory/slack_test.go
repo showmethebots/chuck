@@ -29,6 +29,26 @@ func TestMessagesRoundTrip(t *testing.T) {
 	}
 }
 
+// MarkPosted updates the decision and inserts the message row in one
+// transaction: if the decision does not exist, neither write should land.
+func TestMarkPostedRollsBackOnMissingDecision(t *testing.T) {
+	ctx := context.Background()
+	s := openTemp(t, filepath.Join(t.TempDir(), "state.db"))
+	defer func() { _ = s.Close() }()
+
+	const missing = int64(999)
+	err := s.MarkPosted(ctx, missing, Message{
+		Channel: "C1", TS: "111.222", Direction: "out", Kind: "post", Text: "posted", Allowed: true, CreatedAt: t0,
+	})
+	if err == nil {
+		t.Fatal("MarkPosted on a missing decision did not error")
+	}
+	msgs, err := s.Messages(ctx)
+	if err != nil || len(msgs) != 0 {
+		t.Fatalf("Messages after failed MarkPosted = %+v, %v; want none", msgs, err)
+	}
+}
+
 func TestCreateApprovalIsIdempotent(t *testing.T) {
 	ctx := context.Background()
 	s := openTemp(t, filepath.Join(t.TempDir(), "state.db"))

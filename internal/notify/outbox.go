@@ -13,8 +13,7 @@ import (
 type OutboxStore interface {
 	PendingPosts(ctx context.Context, limit int) ([]memory.DecisionView, error)
 	CreateApproval(ctx context.Context, decisionID int64, request string) error
-	MarkPosted(ctx context.Context, id int64, channel, ts string, at time.Time) error
-	RecordMessage(ctx context.Context, m memory.Message) error
+	MarkPosted(ctx context.Context, id int64, m memory.Message) error
 }
 
 // Outbox sends decision posts that are due. Triage never posts inline, so a
@@ -37,6 +36,11 @@ func (o *Outbox) now() time.Time {
 
 // Flush posts pending decisions oldest first and stops at the first Slack
 // error, leaving the rest for the next flush.
+//
+// Delivery is at-least-once, not exactly-once: Slack has no idempotency key
+// for a new message, so if Post succeeds but the following MarkPosted fails
+// (and so never records slack_ts), the decision is still pending and the
+// next Flush posts it again, producing a duplicate Slack message.
 func (o *Outbox) Flush(ctx context.Context) error {
 	pending, err := o.Store.PendingPosts(ctx, 20)
 	if err != nil {
@@ -55,12 +59,8 @@ func (o *Outbox) Flush(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("post decision %d: %w", v.ID, err)
 		}
-		at := o.now()
-		if err := o.Store.MarkPosted(ctx, v.ID, channel, ts, at); err != nil {
-			return err
-		}
-		if err := o.Store.RecordMessage(ctx, memory.Message{
-			Channel: channel, TS: ts, Direction: "out", Kind: "post", Text: text, Allowed: true, CreatedAt: at,
+		if err := o.Store.MarkPosted(ctx, v.ID, memory.Message{
+			Channel: channel, TS: ts, Direction: "out", Kind: "post", Text: text, Allowed: true, CreatedAt: o.now(),
 		}); err != nil {
 			return err
 		}

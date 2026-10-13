@@ -108,7 +108,8 @@ func TestOutboxQueries(t *testing.T) {
 	if err != nil || len(pending) != 2 || pending[0].ID != grade || pending[1].ID != approval {
 		t.Fatalf("PendingPosts = %+v, %v", pending, err)
 	}
-	if err := s.MarkPosted(ctx, grade, "C1", "111.222", t0); err != nil {
+	msg := Message{Channel: "C1", TS: "111.222", Direction: "out", Kind: "post", Text: "posted", Allowed: true, CreatedAt: t0}
+	if err := s.MarkPosted(ctx, grade, msg); err != nil {
 		t.Fatal(err)
 	}
 	pending, _ = s.PendingPosts(ctx, 10)
@@ -118,6 +119,10 @@ func TestOutboxQueries(t *testing.T) {
 	v, _ := s.DecisionView(ctx, grade)
 	if v.SlackChannel != "C1" || v.SlackTS != "111.222" {
 		t.Errorf("slack location = %q %q", v.SlackChannel, v.SlackTS)
+	}
+	msgs, err := s.Messages(ctx)
+	if err != nil || len(msgs) != 1 || msgs[0].Channel != "C1" || msgs[0].TS != "111.222" {
+		t.Fatalf("Messages after MarkPosted = %+v, %v", msgs, err)
 	}
 
 	// Queueing a grade post never overrides an approval post.

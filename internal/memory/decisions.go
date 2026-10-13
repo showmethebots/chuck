@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"fmt"
 	"time"
 )
 
@@ -156,11 +157,38 @@ func (s *Store) PendingPosts(ctx context.Context, limit int) ([]DecisionView, er
 	return s.views(ctx, `WHERE d.post_kind IS NOT NULL AND d.slack_posted_at IS NULL ORDER BY d.id LIMIT ?`, limit)
 }
 
-// MarkPosted records where a decision's Slack post landed.
-func (s *Store) MarkPosted(ctx context.Context, id int64, channel, slackTS string, at time.Time) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE decisions SET slack_channel = ?, slack_ts = ?, slack_posted_at = ?
-		WHERE id = ?`, channel, slackTS, ts(at), id)
-	return err
+// MarkPosted records where a decision's Slack post landed and appends the
+// sent message to the audit trail, in one transaction: a message row must
+// never exist without the decision reflecting where it was posted, or vice
+// versa. It returns an error, with no message row inserted, if the decision
+// does not exist (the UPDATE affects 0 rows).
+func (s *Store) MarkPosted(ctx context.Context, id int64, m Message) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	res, err := tx.ExecContext(ctx, `UPDATE decisions SET slack_channel = ?, slack_ts = ?, slack_posted_at = ?
+		WHERE id = ?`, m.Channel, m.TS, ts(m.CreatedAt), id)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return fmt.Errorf("MarkPosted: decision %d not found", id)
+	}
+
+	if _, err := tx.ExecContext(ctx, `INSERT INTO messages
+		(slack_channel, slack_ts, slack_user, direction, kind, text, allowed, changed_state, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		m.Channel, m.TS, m.User, m.Direction, m.Kind, m.Text, m.Allowed, m.ChangedState, ts(m.CreatedAt)); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // QueueGradePosts asks for grade posts on decisions that have no post yet.
