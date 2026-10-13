@@ -180,6 +180,76 @@ func TestLoadMissingFile(t *testing.T) {
 	}
 }
 
+func writeSlack(t *testing.T, dir, body string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, "slack.yaml"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestLoadWithoutSlackFile(t *testing.T) {
+	cfg, err := Load(writeConfig(t, validRoutes, validPolicy))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Slack != nil {
+		t.Fatalf("Slack = %+v, want nil", cfg.Slack)
+	}
+	if got := cfg.Slack.RoleOf("U0123456789"); got != RoleNone {
+		t.Fatalf("nil allowlist RoleOf = %v, want RoleNone", got)
+	}
+}
+
+func TestLoadSlackRoles(t *testing.T) {
+	dir := writeConfig(t, validRoutes, validPolicy)
+	writeSlack(t, dir, "owner: UOWNER0001\nmembers: [UMEMBER001, WMEMBER002]\n")
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := map[string]Role{
+		"UOWNER0001": RoleOwner, "UMEMBER001": RoleMember, "WMEMBER002": RoleMember,
+		"USTRANGE01": RoleNone, "": RoleNone,
+	}
+	for user, want := range cases {
+		if got := cfg.Slack.RoleOf(user); got != want {
+			t.Errorf("RoleOf(%q) = %v, want %v", user, got, want)
+		}
+	}
+	if RoleNone >= RoleMember || RoleMember >= RoleOwner {
+		t.Fatal("roles are not ordered")
+	}
+}
+
+func TestLoadSlackRejects(t *testing.T) {
+	cases := map[string]struct{ body, want string }{
+		"unknown key":     {"owner: UOWNER0001\nmembers: []\nadmins: []\n", "admins"},
+		"missing owner":   {"members: []\n", "owner is required"},
+		"bad owner id":    {"owner: clark\n", `owner "clark" is not a Slack user ID`},
+		"lowercase id":    {"owner: uowner0001\n", "is not a Slack user ID"},
+		"bad member id":   {"owner: UOWNER0001\nmembers: [C0123456789]\n", `members[0]: "C0123456789" is not a Slack user ID`},
+		"owner as member": {"owner: UOWNER0001\nmembers: [UOWNER0001]\n", "is the owner"},
+		"duplicate":       {"owner: UOWNER0001\nmembers: [UMEMBER001, UMEMBER001]\n", "listed twice"},
+	}
+	for name, c := range cases {
+		dir := writeConfig(t, validRoutes, validPolicy)
+		writeSlack(t, dir, c.body)
+		_, err := Load(dir)
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: err = %v, want it to contain %q", name, err, c.want)
+		}
+	}
+}
+
+func TestLoadSlackReportsAllErrors(t *testing.T) {
+	dir := writeConfig(t, validRoutes, validPolicy)
+	writeSlack(t, dir, "owner: clark\nmembers: [nope]\n")
+	_, err := Load(dir)
+	if err == nil || !strings.Contains(err.Error(), "owner") || !strings.Contains(err.Error(), "members[0]") {
+		t.Fatalf("err = %v, want both problems", err)
+	}
+}
+
 func replaceOnce(t *testing.T, s, pair string) string {
 	t.Helper()
 	old, new, ok := strings.Cut(pair, "|")

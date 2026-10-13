@@ -1,15 +1,15 @@
-// Package config loads and validates the agent's YAML configuration:
-// config/routes.yaml (routing rules) and config/policy.yaml (permission
-// tiers, budgets, caps). Decoding is strict: unknown keys are errors, so a
-// typo cannot silently disable a rule.
+// Package config loads and validates the agent's YAML configuration: config/routes.yaml (routing rules), config/policy.yaml (permission tiers, budgets, caps), and the optional config/slack.yaml (who chuck listens to on Slack).
 package config
 
 import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -20,6 +20,7 @@ import (
 const (
 	RoutesFile = "routes.yaml"
 	PolicyFile = "policy.yaml"
+	SlackFile  = "slack.yaml"
 )
 
 // Tier is who handles a piece of work.
@@ -60,7 +61,39 @@ const (
 type Config struct {
 	Routes Routes
 	Policy Policy
+	Slack  *Slack // nil when slack.yaml is absent; Slack cannot be turned on without it
 }
+
+// Slack is config/slack.yaml: the allowlist of who chuck listens to. It
+// changes only through a reviewed PR, never a chat command.
+type Slack struct {
+	Owner   string   `yaml:"owner"`
+	Members []string `yaml:"members"`
+}
+
+// Role is what a Slack user may do. Higher roles include lower ones.
+type Role int
+
+const (
+	RoleNone Role = iota
+	RoleMember
+	RoleOwner
+)
+
+// RoleOf returns user's role. A nil allowlist knows nobody.
+func (s *Slack) RoleOf(user string) Role {
+	switch {
+	case s == nil || user == "":
+		return RoleNone
+	case user == s.Owner:
+		return RoleOwner
+	case slices.Contains(s.Members, user):
+		return RoleMember
+	}
+	return RoleNone
+}
+
+var slackUserID = regexp.MustCompile(`^[UW][A-Z0-9]{8,}$`)
 
 // Routes is config/routes.yaml.
 type Routes struct {
@@ -217,6 +250,16 @@ func Load(dir string) (*Config, error) {
 	if err := decodeFile(filepath.Join(dir, PolicyFile), &cfg.Policy); err != nil {
 		return nil, err
 	}
+	slackPath := filepath.Join(dir, SlackFile)
+	switch _, err := os.Stat(slackPath); {
+	case err == nil:
+		cfg.Slack = &Slack{}
+		if err := decodeFile(slackPath, cfg.Slack); err != nil {
+			return nil, err
+		}
+	case !errors.Is(err, fs.ErrNotExist):
+		return nil, err
+	}
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
@@ -350,6 +393,31 @@ func (c *Config) validate() error {
 			if perm == AskFirst && r.Tier != TierHuman {
 				routesErr("%s: ask_first action %q must route to human, not %q", at, a, r.Tier)
 			}
+		}
+	}
+
+	// slack.yaml.
+	if s := c.Slack; s != nil {
+		slackErr := func(format string, a ...any) {
+			errs = append(errs, fmt.Errorf(SlackFile+": "+format, a...))
+		}
+		switch {
+		case s.Owner == "":
+			slackErr("owner is required")
+		case !slackUserID.MatchString(s.Owner):
+			slackErr("owner %q is not a Slack user ID", s.Owner)
+		}
+		seenMember := map[string]bool{}
+		for i, m := range s.Members {
+			switch {
+			case !slackUserID.MatchString(m):
+				slackErr("members[%d]: %q is not a Slack user ID", i, m)
+			case m == s.Owner:
+				slackErr("members[%d]: %q is the owner", i, m)
+			case seenMember[m]:
+				slackErr("members[%d]: %q is listed twice", i, m)
+			}
+			seenMember[m] = true
 		}
 	}
 
