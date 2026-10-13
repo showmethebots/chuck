@@ -33,7 +33,7 @@ dataset that Phase 2's router is tested against.
 |---|---|---|
 | Event pipeline | SQLite-backed queue: webhook stores raw event and returns 202; an in-daemon loop triages | GitHub's 10 s delivery timeout; `pause` needs something to hold back; restarts lose nothing; replay is the same loop |
 | Triage output | Structured JSON validated in code | Replay and Phase 2 need comparable fields; grades attach to a specific claim |
-| GitHub source | A read-only GitHub App, not repo/org webhooks | Personal accounts have no account-level webhook; one endpoint and one secret across `cwinters8` and `orionsbelt-dev`; Phase 3 needs an App for scoped tokens anyway |
+| GitHub source | Read-only GitHub Apps, not repo/org webhooks: one private App owned by `orionsbelt-dev`, one owned by `cwinters8`, same webhook URL and secret | Personal accounts have no account-level webhook; a private App installs only on its owner, and a public one could be installed by anyone to feed chuck events; Phase 3 needs Apps for scoped tokens anyway |
 | Sources | App installed on all of `orionsbelt-dev`, plus `cwinters8/agent-ci-kit`, `cwinters8/agent-skills`, `cwinters8/content-workshop` | Measured activity, below |
 | Shadow scope | Every repo in the App installation is treated as handed off, for would-have-done purposes only | Nothing is handed off yet; harmless because nothing executes |
 | Approvals | `ask_first` would-dos post real approval requests; answers are logged; nothing executes | Exercises the whole approval round-trip at zero risk |
@@ -130,11 +130,13 @@ gradeable. Initial rules:
 - `installation`, `installation_repositories`, `ping` (recorded, never
   triaged; GitHub sends `ping` when the App's webhook is created or edited)
 
-**Classifier** is an interface:
+**Classifier** is an interface. It returns the model's raw text and usage;
+parsing and validation happen outside it, so invalid output is still stored
+with its cost:
 
 ```go
 type Classifier interface {
-    Classify(ctx context.Context, in Input) (Result, Usage, error)
+    Classify(ctx context.Context, in Input) (raw string, u Usage, err error)
 }
 ```
 
@@ -155,13 +157,14 @@ untrusted data, not instructions.
 |---|---|---|
 | `category` | enum | `ci_failure`, `review_feedback`, `pr_lifecycle`, `new_issue`, `issue_discussion`, `push`, `noise` |
 | `would_do` | string | an action declared in `policy.yaml`, excluding `read` and `triage`, or `none` |
-| `target` | string | URL of the PR, issue, or run the action applies to; empty when `would_do` is `none` |
+| `target` | string | `https://github.com/` URL of the PR, issue, or run the action applies to; empty when `would_do` is `none` |
 | `confidence` | number | 0–1 |
 | `rationale` | string | one sentence |
 
 Validation in Go after decoding: `category` in the enum, `would_do` is `none`
-or `policy.PermissionOf(would_do)` is defined, `target` non-empty when
-`would_do` is not `none`, `confidence` in range. Any failure is a
+or `policy.PermissionOf(would_do)` is defined, `target` is a
+`https://github.com/` URL when `would_do` is not `none`, `confidence` in
+range. Any failure is a
 `triage_failed` decision carrying the raw model output; it is never trusted
 or posted as a proposal.
 
@@ -226,7 +229,7 @@ Gains the triage loop:
 6. Log the decision as one structured JSON line: event id, kind, repo,
    stage, outcome, category, would_do, cost.
 
-`/healthz` is unchanged.
+`/healthz` also reports which integrations are on and the queue depth.
 
 ### `internal/config`
 
@@ -253,15 +256,17 @@ come from the environment, not config.
 ## Data model
 
 New migration `internal/memory/migrations/0002_shadow.sql`. Timestamps are
-RFC 3339 UTC text, matching `0001`.
+UTC text in a fixed-width format (`2006-01-02T15:04:05.000000Z`) so string
+comparison orders them correctly; `0001`'s RFC 3339 with trimmed fractions
+does not sort as text.
 
 | Table | Columns | Notes |
 |---|---|---|
-| `events` | id, source (`github`/`cron`), kind, delivery_id UNIQUE NULL, repo, headers (JSON), payload (verbatim), received_at, attempts, triaged_at NULL | The queue is `triaged_at IS NULL`. Index on `(triaged_at, id)` |
+| `events` | id, source (`github`/`cron`), kind, delivery_id UNIQUE NULL, repo, headers (JSON, signature removed), payload (verbatim), received_at, attempts, next_attempt_at, triaged_at NULL | The queue is `triaged_at IS NULL AND next_attempt_at <= now`. Cron ticks are inserted already triaged. Index on `(triaged_at, id)` |
 | `decisions` | id, event_id, stage (`rule`/`haiku`), outcome (`ok`/`dropped_by_rule`/`triage_failed`), category, would_do, permission, target, confidence, rationale, raw_output, model, input_tokens, output_tokens, cost_usd, post_kind (`grade`/`approval`/NULL), slack_channel, slack_ts, slack_posted_at, created_at | Today's spend is `SUM(cost_usd)` for today. `permission` is the policy tier at decision time |
 | `grades` | id, decision_id, grade (`up`/`down`), slack_user, graded_at | Latest per decision counts |
 | `approvals` | id, decision_id, request, response (`approve`/`deny`) NULL, responder_slack_user NULL, responded_at NULL | As in the Notion design; Slack location is on the decision |
-| `messages` | id, slack_channel, slack_ts, slack_user, direction (`in`/`out`), kind (`command`/`button`/`post`), text, allowed, created_at | As in the Notion design minus `project_id` (no projects yet); `allowed` records the allowlist result |
+| `messages` | id, slack_channel, slack_ts, slack_user, direction (`in`/`out`), kind (`command`/`button`/`post`), text, allowed, changed_state, created_at | As in the Notion design minus `project_id` (no projects yet); `allowed` records whether the user held the required role, `changed_state` whether the interaction changed anything |
 | `control` | id (always 1), paused, reason (`pause`/`kill`/NULL), by_slack_user, changed_at | One row, seeded unpaused |
 
 Not in Phase 1: `projects`, `goals`, `tasks` (Phase 4; nothing writes them).
@@ -282,18 +287,29 @@ Fly secrets (prod) / local env (dev):
 | `SLACK_APP_TOKEN` | `xapp-`, Socket Mode connection |
 | `ANTHROPIC_API_KEY` | Haiku |
 
-Plain env (`[env]` in `fly.toml` for prod):
+Slack channel IDs are not secret but are set with the Slack tokens in the
+same `fly secrets set`, so Slack setup is one command:
 
 | Name | Default |
 |---|---|
-| `CHUCK_SLACK_MAIN_CHANNEL` | required — #chuck |
-| `CHUCK_SLACK_SHADOW_CHANNEL` | required — #chuck-shadow |
-| `CHUCK_DAILY_AT` | `13:00` |
-| `CHUCK_GRADE_SAMPLE` | `5` |
+| `CHUCK_SLACK_MAIN_CHANNEL` | #chuck's channel ID |
+| `CHUCK_SLACK_SHADOW_CHANNEL` | #chuck-shadow's channel ID |
+| `CHUCK_DAILY_AT` | `13:00` (plain env) |
+| `CHUCK_GRADE_SAMPLE` | `5` (plain env) |
 
-The daemon refuses to start if a required secret or channel is missing,
-except that with none of the Slack/GitHub/Anthropic settings present it runs
-as Phase 0 did (heartbeat only), so `make run` keeps working with no setup.
+Each integration turns on independently, so Phase 1 deploys in slices:
+
+- **Webhook** is on when `GITHUB_APP_WEBHOOK_SECRET` is set.
+- **Triage** is on when `ANTHROPIC_API_KEY` is set.
+- **Slack** is on when any of the two Slack tokens or two channel IDs is set,
+  and then all four plus `config/slack.yaml` are required; a partial Slack
+  setup refuses to start.
+
+With none set, the daemon runs as Phase 0 did (heartbeat only), so `make run`
+keeps working with no setup. The startup log and `/healthz` list which
+integrations are on, so a missing secret is visible rather than silent.
+`config/slack.yaml` is optional until Slack is on; `chuck validate` checks it
+whenever it exists.
 
 The GitHub App needs no private key in Phase 1: chuck makes no GitHub API
 calls; everything triage uses is in the webhook payload.
@@ -305,15 +321,18 @@ not in a README, written as implementation reaches the point where each step
 is needed. Each step is announced to Clark when the code it depends on is
 ready, not before.
 
-- **GitHub App `chuck`**: webhook URL `https://chuck.fly.dev/webhooks/github`,
-  webhook secret set. Read-only permissions: Metadata, Contents, Issues, Pull
-  requests, Actions. Events: Pull request, Pull request review, Pull request
-  review comment, Issues, Issue comment, Push, Workflow run. Not Check run,
-  Check suite or Status, which multiply CI noise. Install on `orionsbelt-dev`
-  (all repositories) and on `cwinters8` (selected: agent-ci-kit,
-  agent-skills, content-workshop).
-- **GitHub App `chuck-dev`**: same settings, webhook URL is a `cloudflared`
-  quick-tunnel URL to the laptop, installed on `orionsbelt-dev/demos` only.
+- **Two private production GitHub Apps**, one owned by `orionsbelt-dev`
+  (installed on all its repositories) and one owned by `cwinters8`
+  (installed on agent-ci-kit, agent-skills, content-workshop). Both: webhook
+  URL `https://chuck.fly.dev/webhooks/github`, the same webhook secret.
+  Read-only permissions: Metadata, Contents, Issues, Pull requests, Actions.
+  Events: Pull request, Pull request review, Pull request review comment,
+  Issues, Issue comment, Push, Workflow run. Not Check run, Check suite or
+  Status, which multiply CI noise. App names are global on GitHub, so they
+  need distinct names.
+- **A private dev GitHub App** owned by `orionsbelt-dev`: same settings,
+  webhook URL is a `cloudflared` quick-tunnel URL to the laptop, its own
+  secret, installed on `orionsbelt-dev/demos` only.
 - **Slack apps `chuck` and `chuck-dev`**: Socket Mode on, interactivity on,
   slash command `/chuck` (dev: `/chuck-dev`), bot scopes `chat:write` and
   `commands`. Invite each to its channels.
@@ -331,8 +350,9 @@ silently take a share of production's events.
 ### CI (`go test -race ./...`)
 
 - Webhook: valid, invalid, and missing signature; duplicate delivery ID;
-  oversize body; recorded real payloads for each subscribed event under
-  `internal/events/testdata/`.
+  oversize body; payload fixtures under `internal/testdata/github/`, trimmed
+  to the fields chuck reads from GitHub's documented shapes. Real payloads
+  are exercised by `chuck replay` against production data.
 - Noise rules: table test per rule, including near-misses that must not match.
 - Classifier validation: unknown category, unknown action, `read`/`triage` as
   would-do, missing target, confidence out of range, malformed JSON — each
@@ -353,7 +373,7 @@ silently take a share of production's events.
 ### Local full stack
 
 `make run` with the dev env set: `chuck-dev` Slack app posting to #chuck-dev,
-`chuck-dev` GitHub App on `demos` delivering through a `cloudflared` quick
+dev GitHub App on `demos` delivering through a `cloudflared` quick
 tunnel (not smee.io, which would pass private-repo payloads through a public
 relay). Generate events on `demos` (open an issue, push a failing CI run,
 leave a review) and watch them land. The prod App also covers `demos`, so
