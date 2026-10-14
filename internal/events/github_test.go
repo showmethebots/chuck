@@ -1,6 +1,7 @@
 package events
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/hmac"
@@ -8,12 +9,15 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -295,5 +299,110 @@ func TestWebhookGivesUpWaitingWhenClientLeaves(t *testing.T) {
 	h.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/webhooks/github", strings.NewReader("{}")).WithContext(ctx))
 	if w.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want 503 for a client that gave up waiting", w.Code)
+	}
+}
+
+// A body with a Content-Length is read into one exactly-sized buffer, not
+// grown by io.ReadAll's repeated reallocation (which roughly doubles peak
+// memory per body).
+func TestWebhookReadsBodyWithOneAllocation(t *testing.T) {
+	const size = 8 << 20
+	body := bytes.Repeat([]byte("a"), size)
+	h := newHook(&fakeStore{}, "k")
+	r := httptest.NewRequest(http.MethodPost, "/webhooks/github", bytes.NewReader(body))
+	r.Header.Set("X-Hub-Signature-256", "sha256=00") // rejected after the read
+	w := httptest.NewRecorder()
+
+	runtime.GC()
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	h.ServeHTTP(w, r)
+	runtime.ReadMemStats(&after)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", w.Code)
+	}
+	if got := after.TotalAlloc - before.TotalAlloc; got > size*5/4 {
+		t.Fatalf("allocated %d bytes reading a %d-byte body; want about one body", got, size)
+	}
+}
+
+type errBody struct{ err error }
+
+func (b errBody) Read([]byte) (int, error) { return 0, b.err }
+
+type timeoutErr struct{}
+
+func (timeoutErr) Error() string   { return "i/o timeout" }
+func (timeoutErr) Timeout() bool   { return true }
+func (timeoutErr) Temporary() bool { return true }
+
+// Only an oversized body is a 413; a read that times out or fails is not.
+func TestWebhookBodyReadErrorStatus(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want int
+	}{
+		{"timeout", timeoutErr{}, http.StatusRequestTimeout},
+		{"other read error", errors.New("connection reset"), http.StatusBadRequest},
+	}
+	for _, c := range cases {
+		r := httptest.NewRequest(http.MethodPost, "/webhooks/github", errBody{c.err})
+		r.ContentLength = -1
+		w := httptest.NewRecorder()
+		newHook(&fakeStore{}, "k").ServeHTTP(w, r)
+		if w.Code != c.want {
+			t.Errorf("%s: status = %d, want %d", c.name, w.Code, c.want)
+		}
+	}
+}
+
+func TestWebhookRejectsDeclaredOversizeBeforeReading(t *testing.T) {
+	b := &blockingBody{started: make(chan struct{}), release: make(chan struct{})}
+	close(b.release)
+	r := httptest.NewRequest(http.MethodPost, "/webhooks/github", b)
+	r.ContentLength = maxBody + 1
+	w := httptest.NewRecorder()
+	newHook(&fakeStore{}, "k").ServeHTTP(w, r)
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want 413", w.Code)
+	}
+	select {
+	case <-b.started:
+		t.Fatal("read the body of a request that declared an oversized Content-Length")
+	default:
+	}
+}
+
+// Over a real connection, a sender that stalls mid-body loses its slot after
+// BodyTimeout and gets a 408, so it cannot hold the slot until the server's
+// overall read timeout.
+func TestWebhookStalledSenderTimesOut(t *testing.T) {
+	h := newHook(&fakeStore{}, "k")
+	h.BodyTimeout = 200 * time.Millisecond
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+
+	conn, err := net.Dial("tcp", srv.Listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.Close() }()
+	// Declare 1000 bytes, send 10, then stall.
+	_, err = fmt.Fprintf(conn, "POST /webhooks/github HTTP/1.1\r\nHost: x\r\nContent-Length: 1000\r\n\r\n0123456789")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.SetReadDeadline(time.Now().Add(3 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.ReadResponse(bufio.NewReader(conn), nil)
+	if err != nil {
+		t.Fatalf("no response to a stalled sender: %v", err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusRequestTimeout {
+		t.Fatalf("status = %d, want 408", resp.StatusCode)
 	}
 }
