@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func env(m map[string]string) func(string) string {
@@ -109,6 +110,21 @@ func TestLoadIntegrationsSlack(t *testing.T) {
 	_, err = loadIntegrations(env(partial))
 	if err == nil || !strings.Contains(err.Error(), "SLACK_APP_TOKEN") || !strings.Contains(err.Error(), "CHUCK_SLACK_SHADOW_CHANNEL") {
 		t.Fatalf("partial Slack env: err = %v, want both missing names", err)
+	}
+}
+
+func TestLoadIntegrationsSchedule(t *testing.T) {
+	in, err := loadIntegrations(env(nil))
+	if err != nil || in.GradeSample != 5 {
+		t.Fatalf("defaults: %+v, %v", in, err)
+	}
+	if got := in.Daily.Next(time.Date(2026, 10, 13, 0, 0, 0, 0, time.UTC)); got.Hour() != 13 {
+		t.Fatalf("default daily time = %v, want 13:00", got)
+	}
+	for k, v := range map[string]string{"CHUCK_DAILY_AT": "1pm", "CHUCK_GRADE_SAMPLE": "-1"} {
+		if _, err := loadIntegrations(env(map[string]string{k: v})); err == nil || !strings.Contains(err.Error(), k) {
+			t.Errorf("%s=%s: err = %v", k, v, err)
+		}
 	}
 }
 

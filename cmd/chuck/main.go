@@ -15,6 +15,8 @@
 //	SLACK_APP_TOKEN            Slack app-level token (xapp-) for Socket Mode
 //	CHUCK_SLACK_MAIN_CHANNEL   channel ID for approvals, the daily summary, and notices
 //	CHUCK_SLACK_SHADOW_CHANNEL channel ID for grade posts
+//	CHUCK_DAILY_AT             daily summary and grade sample time, HH:MM UTC (default 13:00)
+//	CHUCK_GRADE_SAMPLE         quiet decisions sampled for grading each day (default 5)
 package main
 
 import (
@@ -25,6 +27,8 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -123,6 +127,13 @@ func runDaemon(ctx context.Context, log *slog.Logger, getenv func(string) string
 	if in.WebhookSecret != "" {
 		d.Webhook = &events.GitHub{Secret: []byte(in.WebhookSecret), Store: store, Log: log}
 	}
+
+	haikuBudget := cfg.Policy.Budgets.DailyUSD[config.TierHaiku]
+	var sc *notify.Slack
+	if in.Slack != nil {
+		sc = notify.NewSlack(in.Slack.BotToken, in.Slack.AppToken, log)
+	}
+
 	if in.AnthropicKey != "" {
 		tr := &daemon.Triage{
 			Store:      store,
@@ -130,19 +141,38 @@ func runDaemon(ctx context.Context, log *slog.Logger, getenv func(string) string
 			Policy:     cfg.Policy,
 			Log:        log,
 		}
+		if sc != nil {
+			tr.OnBudgetHit = func(ctx context.Context, spent, budget float64) {
+				if _, err := sc.Post(ctx, in.Slack.MainChannel, notify.BudgetText(spent, budget), nil); err != nil {
+					log.Error("post budget notice", "err", err.Error())
+				}
+			}
+		}
 		d.Background = append(d.Background, tr.Run)
 	}
-	if in.Slack != nil {
-		sc := notify.NewSlack(in.Slack.BotToken, in.Slack.AppToken, log)
+
+	jobs := &daemon.DailyJobs{
+		Store: store, Sample: in.GradeSample, HaikuBudget: haikuBudget, Log: log,
+		Disk: func() (uint64, uint64, error) { return daemon.DiskUsage(filepath.Dir(dbPath)) },
+	}
+	if sc != nil {
 		ob := &notify.Outbox{Store: store, Poster: sc, MainChannel: in.Slack.MainChannel,
 			ShadowChannel: in.Slack.ShadowChannel, Log: log}
 		ix := &notify.Interactions{Store: store, Allow: cfg.Slack, Poster: sc, MainChannel: in.Slack.MainChannel,
-			HaikuBudget: cfg.Policy.Budgets.DailyUSD[config.TierHaiku], Version: version, Log: log}
+			HaikuBudget: haikuBudget, Version: version, Log: log}
+		jobs.Poster, jobs.MainChannel = sc, in.Slack.MainChannel
 		d.Background = append(d.Background,
 			func(ctx context.Context) { ob.Run(ctx, 5*time.Second) },
 			func(ctx context.Context) { sc.Run(ctx, ix) },
 		)
 	}
+	d.Background = append(d.Background, func(ctx context.Context) {
+		events.RunDaily(ctx, in.Daily, time.Now, func(ctx context.Context, at time.Time) {
+			if err := jobs.Run(ctx, at); err != nil {
+				log.Error("daily jobs", "err", err.Error())
+			}
+		})
+	})
 	return d.Run(ctx, ln)
 }
 
@@ -158,6 +188,8 @@ func envOr(getenv func(string) string, key, def string) string {
 type integrations struct {
 	WebhookSecret string
 	AnthropicKey  string
+	Daily         events.Daily
+	GradeSample   int
 	Slack         *slackEnv // nil when Slack is off
 }
 
@@ -168,9 +200,19 @@ type slackEnv struct {
 var slackVars = []string{"SLACK_BOT_TOKEN", "SLACK_APP_TOKEN", "CHUCK_SLACK_MAIN_CHANNEL", "CHUCK_SLACK_SHADOW_CHANNEL"}
 
 func loadIntegrations(getenv func(string) string) (integrations, error) {
+	daily, err := events.ParseDaily(envOr(getenv, "CHUCK_DAILY_AT", "13:00"))
+	if err != nil {
+		return integrations{}, fmt.Errorf("CHUCK_DAILY_AT: %w", err)
+	}
+	sample, err := strconv.Atoi(envOr(getenv, "CHUCK_GRADE_SAMPLE", "5"))
+	if err != nil || sample < 0 {
+		return integrations{}, fmt.Errorf("CHUCK_GRADE_SAMPLE: want a whole number >= 0, got %q", getenv("CHUCK_GRADE_SAMPLE"))
+	}
 	in := integrations{
 		WebhookSecret: getenv("GITHUB_APP_WEBHOOK_SECRET"),
 		AnthropicKey:  getenv("ANTHROPIC_API_KEY"),
+		Daily:         daily,
+		GradeSample:   sample,
 	}
 	var set, missing []string
 	for _, k := range slackVars {
