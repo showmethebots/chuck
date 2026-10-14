@@ -29,7 +29,7 @@ see; anything else is a failure to report in the chuck session.
    approve it as a different GitHub user if you can (or leave a comment
    saying it is ready to merge), and let CI pass. Within a minute or two of
    the CI run completing, `#chuck` shows a post headed *SHADOW — nothing
-   will execute* proposing `merge`. As the second account, click Approve.
+   will execute.* proposing `merge`. As the second account, click Approve.
    See: the buttons disappear and the post says `Approved by @second`. As
    owner, click 👍 on it. See: `Graded 👍`. If triage proposes something
    other than `merge`, grade it 👎 — that is real signal, not a checklist
@@ -37,8 +37,13 @@ see; anything else is a failure to report in the chuck session.
 7. **First answer wins.** On another approval post, click Approve as the
    second account, then Deny as owner. See: the owner is told it was
    already answered; the post still says Approved.
-8. **Grade post arrives.** Open an issue on `demos`. See: a post in
-   `#chuck-shadow` within a minute or two.
+8. **Grade post arrives.** Open an issue on `demos` that clearly asks for
+   something actionable (for example, a bug report with steps to reproduce
+   and a request for a fix). See: a post in `#chuck-shadow` within a minute
+   or two. If no post appears, check
+   `fly logs -c deploy/fly.toml | grep '"msg":"decision"'` — a decision
+   with `"would_do":"none"` is correct behavior (it only surfaces in the
+   daily sample), not a failure.
 
 Afterwards, remove the second account from `members:` only if you do not
 want it to keep member powers; it is harmless to leave.

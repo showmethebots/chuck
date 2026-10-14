@@ -34,7 +34,7 @@ make smoke
 | `cmd/chuck/main.go` (env vars and defaults) | its package doc comment, `Dockerfile` `ENV`, `deploy/entrypoint.sh`, `deploy/litestream.yml`, `deploy/smoke-restore.sh`, `deploy/fly.toml` `[env]`, `Makefile` `run`, `docs/phase-1-human-steps.md` (secret and env names) |
 | `Makefile` targets | `README.md` "Development", this profile's `## Mechanical checks` |
 | `.github/workflows/ci.yml` checks | this profile's `## Mechanical checks` |
-| Current phase | `README.md` status line, package comments in `internal/daemon/daemon.go`, `deploy/worker.Dockerfile`, `internal/memory/migrations/0001_boots.sql` |
+| Current phase | `README.md` status line, `deploy/worker.Dockerfile`, `internal/memory/migrations/0001_boots.sql` |
 
 ## Dependencies
 
@@ -95,21 +95,35 @@ to `main` deploys to production through the `production` environment.
 
 ## Threat model
 
-The repo ships a container image to a single Fly Machine (`chuck`).
-Its only inbound surface is an unauthenticated `GET /healthz` behind Fly's
-HTTPS proxy, which returns the version and boot count. What matters is the
-Fly app, its volume, and the Tigris bucket holding the replicated state. The
-control that guards them is credential custody. `FLY_API_TOKEN` is an
-app-scoped deploy token that only the CI `deploy` job can reach, through the
+The repo ships a container image to a single Fly Machine (`chuck`). Its
+inbound surfaces are the unauthenticated `GET /healthz` behind Fly's HTTPS
+proxy (version and boot count only) and `POST /webhooks/github`
+(`internal/events`), which verifies GitHub's `X-Hub-Signature-256` with
+HMAC-SHA256 against `GITHUB_APP_WEBHOOK_SECRET` — an empty secret rejects
+every request rather than opening the endpoint — and caps the body at
+25 MB. chuck also makes an outbound Slack Socket Mode connection; inbound
+commands and button clicks on it are checked against the `config/slack.yaml`
+allowlist before anything else happens (`internal/notify`, enforced with
+`internal/config`'s `Slack.RoleOf`). What matters is the Fly app, its
+volume, and the Tigris bucket holding the replicated state. The control
+that guards them is credential custody. `FLY_API_TOKEN` is an app-scoped
+deploy token that only the CI `deploy` job can reach, through the
 `production` GitHub environment. The Tigris keys are Fly app secrets that
 never enter the repo. The workflow runs on `pull_request` and its token is
 `contents: read`, so a fork PR can't reach either credential.
 
 The product's own authorization model is the permission tiers in
 `config/policy.yaml`, enforced by `internal/config`. A change that lets an
-`ask_first` action reach a model tier is the critical failure. In Phase 0 the
-daemon takes no actions yet, so that gate is enforced in config but nothing
-consumes it.
+`ask_first` action reach a model tier is the critical failure. Phase 1 also
+sends untrusted GitHub text (issue bodies, comments, review text) to Haiku
+for triage (`internal/triage`); that text is data, never instructions —
+the model's output is validated against `policy.yaml`'s declared actions,
+a proposed `target` must be a `https://github.com/` URL, `</event>` is
+escaped in the prompt so untrusted text can't close the tag early, and the
+agent marker (`<!-- agent: <skill> -->`) is honoured only when the text's
+own author (`user.login`) is `cwinters8`. Phase 1 executes nothing: triage
+only records a decision and, for `ask_first` proposals, an approval — no
+code path acts on either.
 
 ## Trust boundary
 
@@ -117,7 +131,10 @@ consumes it.
 | --- | --- |
 | `config/**` | authorization |
 | `internal/config/**` | authorization |
-| `internal/daemon/**` | client-data, auth-session |
+| `internal/daemon/**` | client-data, auth-session, authorization |
+| `internal/events/**` | secrets, client-data |
+| `internal/notify/**` | authorization, secrets |
+| `internal/triage/**` | client-data, secrets, authorization |
 | `internal/memory/**` | client-data |
 | `cmd/**` | secrets, client-data |
 | `deploy/**` | auth-session, secrets, supply-chain |
@@ -133,23 +150,38 @@ ci-workflows
 
 ## Identity model
 
-There are no end users. The daemon's HTTP server has no authentication, so
-any route added to `internal/daemon` is public through Fly's proxy
-(`deploy/fly.toml` `[http_service]`, `force_https`). Deploys authenticate to
-Fly with an app-scoped `FLY_API_TOKEN` deploy token, which is stored on the
-`production` GitHub environment. Litestream authenticates to Tigris with
-`AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`, which `fly storage create`
-sets as Fly secrets. Operators reach the Machine through `fly ssh console`
-with their own Fly account.
+There are no end users. The HTTP server has no authentication layer of its
+own: `GET /healthz` is public through Fly's proxy (`deploy/fly.toml`
+`[http_service]`, `force_https`), and any new route is public unless it
+checks something itself, as `POST /webhooks/github` does with its
+HMAC-SHA256 signature check (see `## Threat model`). GitHub identity is
+two private GitHub Apps in production — one owned by `orionsbelt-dev`, one
+by `cwinters8`, sharing one webhook secret — plus a dev App for local
+testing; all three get read-only repository permissions (Actions, Contents,
+Issues, Metadata, Pull requests) and no private key, since chuck makes no
+GitHub API calls in Phase 1 (`docs/phase-1-human-steps.md` section 1).
+Slack identity is the owner/member roles in `config/slack.yaml`
+(`internal/config`'s `Slack.RoleOf`), changed only by a merged PR — no chat
+command or runtime path can add a user or change a role (`AGENTS.md`).
+Deploys authenticate to Fly with an app-scoped `FLY_API_TOKEN` deploy
+token, which is stored on the `production` GitHub environment. Litestream
+authenticates to Tigris with `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`,
+which `fly storage create` sets as Fly secrets. Operators reach the Machine
+through `fly ssh console` with their own Fly account.
 
 ## Secrets policy
 
-Real secrets live in two places only: Fly app secrets (`BUCKET_NAME` and the
-`AWS_*` Tigris credentials) and the GitHub `production` environment
-(`FLY_API_TOKEN`). `deploy/fly.toml` `[env]`, `Dockerfile` `ENV` and
-`config/*.yaml` are committed and baked into the image, so they hold
-non-secret settings only. Never commit a secret, a `.db` file or `data/`.
-`.gitignore` and `.dockerignore` exclude the last two.
+Real secrets live in two places only: Fly app secrets and the GitHub
+`production` environment (`FLY_API_TOKEN`). The Fly app secrets are
+`BUCKET_NAME` and the `AWS_*` Tigris credentials, plus, as each integration
+turns on, `GITHUB_APP_WEBHOOK_SECRET`, `ANTHROPIC_API_KEY`,
+`SLACK_BOT_TOKEN`, and `SLACK_APP_TOKEN` (`docs/phase-1-human-steps.md`
+sections 1-3). The Slack channel IDs (`CHUCK_SLACK_MAIN_CHANNEL`,
+`CHUCK_SLACK_SHADOW_CHANNEL`) are set alongside those tokens but are not
+secret. `deploy/fly.toml` `[env]`, `Dockerfile` `ENV` and `config/*.yaml`
+are committed and baked into the image, so they hold non-secret settings
+only. Never commit a secret, a `.db` file or `data/`. `.gitignore` and
+`.dockerignore` exclude the last two.
 
 ## Known gaps
 
