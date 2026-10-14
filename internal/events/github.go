@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -21,11 +22,18 @@ import (
 // maxBody is GitHub's own cap on a webhook payload.
 const maxBody = 25 << 20
 
-// maxInFlight bounds how many webhook bodies are read at once. The body must
-// be read in full before its signature can be checked, each can be up to
-// maxBody, and the Machine has 256 MB, so unbounded concurrent (or slow)
-// requests could exhaust memory. Extra requests wait for a slot instead of
-// failing, because GitHub does not retry failed App deliveries.
+// defaultBodyTimeout bounds how long a request may hold a read slot.
+const defaultBodyTimeout = 10 * time.Second
+
+// maxInFlight bounds how many webhook bodies are read at once. A body must
+// be read in full before its signature can be checked, and each can be up
+// to maxBody. Measured locally (macOS, Go 1.27, three concurrent unsigned
+// 25 MB posts repeated six times), peak RSS was 140 MB before exact-size
+// reads, 127 MB with them and 2 slots, and 100 MB with 1 slot. The Fly
+// Machine has 256 MB shared with Litestream, so this narrows the risk
+// without ruling it out; turning away non-GitHub senders before reading is
+// the complete fix. Extra requests wait for a slot instead of failing,
+// because GitHub does not retry failed App deliveries.
 const maxInFlight = 2
 
 // GitHubStore is the part of memory.Store the webhook needs.
@@ -40,6 +48,8 @@ type GitHub struct {
 	Store  GitHubStore
 	Log    *slog.Logger
 	Now    func() time.Time // nil means time.Now
+	// BodyTimeout bounds how long a request may hold a read slot; 0 means 10 s.
+	BodyTimeout time.Duration
 
 	slotsOnce sync.Once
 	slots     chan struct{}
@@ -55,9 +65,23 @@ func (g *GitHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBody))
+	// A sender that holds a slot must finish quickly: GitHub itself gives up
+	// on a delivery after 10 s, so anything slower is not GitHub. Recorders in
+	// tests do not support deadlines; that error is ignored.
+	_ = http.NewResponseController(w).SetReadDeadline(time.Now().Add(g.bodyTimeout()))
+
+	body, err := readBody(w, r)
 	if err != nil {
-		http.Error(w, "body too large", http.StatusRequestEntityTooLarge)
+		var tooBig *http.MaxBytesError
+		var netErr interface{ Timeout() bool }
+		switch {
+		case errors.As(err, &tooBig):
+			http.Error(w, "body too large", http.StatusRequestEntityTooLarge)
+		case errors.As(err, &netErr) && netErr.Timeout():
+			http.Error(w, "body read timed out", http.StatusRequestTimeout)
+		default:
+			http.Error(w, "could not read body", http.StatusBadRequest)
+		}
 		return
 	}
 	delivery := r.Header.Get("X-GitHub-Delivery")
@@ -111,6 +135,33 @@ func (g *GitHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	g.Log.Info("github event", "event_id", id, "kind", kind, "repo", meta.Repository.FullName,
 		"delivery", delivery, "duplicate", !inserted)
 	w.WriteHeader(http.StatusAccepted)
+}
+
+// readBody reads the request body into a single buffer. With a
+// Content-Length (GitHub always sends one) the buffer is allocated once at
+// its exact size; io.ReadAll's repeated growth would roughly double the peak
+// memory of each 25 MB body. A declared length over maxBody is rejected
+// before anything is read.
+func readBody(w http.ResponseWriter, r *http.Request) ([]byte, error) {
+	n := r.ContentLength
+	if n > maxBody {
+		return nil, &http.MaxBytesError{Limit: maxBody}
+	}
+	if n < 0 {
+		return io.ReadAll(http.MaxBytesReader(w, r.Body, maxBody))
+	}
+	body := make([]byte, n)
+	if _, err := io.ReadFull(r.Body, body); err != nil {
+		return nil, err
+	}
+	return body, nil
+}
+
+func (g *GitHub) bodyTimeout() time.Duration {
+	if g.BodyTimeout > 0 {
+		return g.BodyTimeout
+	}
+	return defaultBodyTimeout
 }
 
 func (g *GitHub) now() time.Time {
