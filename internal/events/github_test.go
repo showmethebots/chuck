@@ -228,7 +228,7 @@ func (b *blockingBody) Read([]byte) (int, error) {
 	return 0, io.EOF
 }
 
-// Each body can be up to maxBody and the Machine has 256 MB, so only
+// Each body can be up to maxBody and is read before its signature, so only
 // maxInFlight bodies are read at once; further requests wait their turn
 // rather than being rejected (GitHub does not retry failed deliveries).
 func TestWebhookLimitsBodiesInFlight(t *testing.T) {

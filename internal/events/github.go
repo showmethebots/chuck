@@ -30,9 +30,8 @@ const defaultBodyTimeout = 10 * time.Second
 // to maxBody. Measured locally (macOS, Go 1.27, three concurrent unsigned
 // 25 MB posts repeated six times), peak RSS was 140 MB before exact-size
 // reads, 127 MB with them and 2 slots, and 100 MB with 1 slot. The Fly
-// Machine has 256 MB shared with Litestream, so this narrows the risk
-// without ruling it out; turning away non-GitHub senders before reading is
-// the complete fix. Extra requests wait for a slot instead of failing,
+// Machine has 512 MB shared with Litestream, which leaves headroom, but
+// turning away non-GitHub senders before reading is the complete fix. Extra requests wait for a slot instead of failing,
 // because GitHub does not retry failed App deliveries.
 const maxInFlight = 2
 
