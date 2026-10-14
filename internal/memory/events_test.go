@@ -178,3 +178,20 @@ func TestOpenUpgradesPhase0Database(t *testing.T) {
 		t.Fatalf("QueueDepth = %d, %v", n, err)
 	}
 }
+
+// control.reason only ever holds "pause" or "kill" while paused, and NULL
+// otherwise; the schema enforces that like every other enum-like column.
+func TestControlReasonIsChecked(t *testing.T) {
+	ctx := context.Background()
+	s := openTemp(t, filepath.Join(t.TempDir(), "state.db"))
+	defer func() { _ = s.Close() }()
+
+	for _, ok := range []any{"pause", "kill", nil} {
+		if _, err := s.db.ExecContext(ctx, `UPDATE control SET reason = ? WHERE id = 1`, ok); err != nil {
+			t.Errorf("reason %v rejected: %v", ok, err)
+		}
+	}
+	if _, err := s.db.ExecContext(ctx, `UPDATE control SET reason = 'nap' WHERE id = 1`); err == nil {
+		t.Error("reason 'nap' accepted; want a CHECK violation")
+	}
+}
