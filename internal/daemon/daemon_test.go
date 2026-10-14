@@ -210,3 +210,12 @@ func TestRunStopsBackgroundJobs(t *testing.T) {
 		t.Fatal("Run returned before the background job stopped")
 	}
 }
+
+// A slow client must not hold a request (and its webhook body buffer) open
+// indefinitely: the whole request, body included, has a deadline.
+func TestServerBoundsRequestReadTime(t *testing.T) {
+	srv := newDaemon(&syncBuffer{}).server()
+	if srv.ReadHeaderTimeout <= 0 || srv.ReadTimeout <= 0 {
+		t.Fatalf("ReadHeaderTimeout=%v ReadTimeout=%v; both must be set", srv.ReadHeaderTimeout, srv.ReadTimeout)
+	}
+}

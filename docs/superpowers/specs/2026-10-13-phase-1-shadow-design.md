@@ -89,6 +89,9 @@ Package layout follows the Notion design's suggested repo layout.
 **`github.go`** — `POST /webhooks/github`.
 
 1. Read the body through `http.MaxBytesReader` at 25 MB, GitHub's own cap.
+   At most 2 bodies are read at once (further requests wait for a slot),
+   and the server's 30 s `ReadTimeout` covers the body, so concurrent or
+   slow requests cannot exhaust the 256 MB Machine.
 2. Verify `X-Hub-Signature-256` against `GITHUB_APP_WEBHOOK_SECRET` with a
    constant-time compare. Missing or wrong signature: 401, nothing stored.
 3. Insert into `events` with `delivery_id` from `X-GitHub-Delivery`. A
