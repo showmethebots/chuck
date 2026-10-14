@@ -100,3 +100,88 @@ backstop if that ever fails.
    `"integrations":["github_webhook","triage"]`, and `queue_depth` falls to
    near 0 within a few minutes as the backlog from section 1 is triaged.
    `fly logs -c deploy/fly.toml | grep '"msg":"decision"'` shows decisions.
+
+## 3. Slack (after the slice C PR merges and deploys)
+
+chuck talks to Slack over Socket Mode, so Slack needs no public URL. Order
+matters: the allowlist must be deployed **before** the Slack secrets are
+set, because chuck refuses to start with Slack on and no allowlist.
+
+### 3.1 Channels
+
+Create `#chuck` and `#chuck-shadow` (and `#chuck-dev` if you will run chuck
+locally). Note each channel's ID: open the channel → click its name → the ID
+is at the bottom of the About tab (starts with `C`).
+
+### 3.2 Create the app
+
+1. https://api.slack.com/apps → **Create New App** → **From a manifest** →
+   your workspace → paste:
+
+   ```yaml
+   display_information:
+     name: chuck
+   features:
+     bot_user:
+       display_name: chuck
+       always_online: true
+     slash_commands:
+       - command: /chuck
+         description: status, pause, kill, resume
+         usage_hint: status | pause | kill | resume
+         should_escape: false
+   oauth_config:
+     scopes:
+       bot:
+         - chat:write
+         - commands
+   settings:
+     interactivity:
+       is_enabled: true
+     socket_mode_enabled: true
+     org_deploy_enabled: false
+     token_rotation_enabled: false
+   ```
+
+2. **Install App** → Install to workspace. Copy the **Bot User OAuth Token**
+   (`xoxb-…`).
+3. **Basic Information** → **App-Level Tokens** → **Generate Token and
+   Scopes**, name `socket`, scope `connections:write`. Copy it (`xapp-…`).
+4. In `#chuck` and `#chuck-shadow`: `/invite @chuck`.
+
+### 3.3 Your Slack user ID, then the allowlist PR
+
+1. Click your avatar → **Profile** → **⋮** → **Copy member ID** (starts with
+   `U`).
+2. Send it to the chuck session. It opens a PR adding `config/slack.yaml`
+   with you as owner and no members. Merge it and wait for the deploy to
+   finish (`gh run watch` or the Actions tab).
+
+### 3.4 Give chuck the Slack secrets
+
+```sh
+fly secrets set -c deploy/fly.toml \
+  SLACK_BOT_TOKEN=xoxb-... \
+  SLACK_APP_TOKEN=xapp-... \
+  CHUCK_SLACK_MAIN_CHANNEL=C... \
+  CHUCK_SLACK_SHADOW_CHANNEL=C...
+```
+
+### 3.5 Check
+
+1. `curl -s https://chuck.fly.dev/healthz` lists `"slack"` in `integrations`.
+2. In `#chuck`: `/chuck status` replies (only you see it) with `running`.
+3. Grade posts start appearing in `#chuck-shadow` as events arrive.
+
+### 3.6 Second Slack account
+
+For the live checklist (section 4). Invite a second email address of yours to
+the workspace, sign in as it in another browser profile, join `#chuck`, and
+copy its member ID as in 3.3. Do not add it to `config/slack.yaml` yet.
+
+### 3.7 Dev app (can wait until local testing)
+
+Repeat 3.2 with `name: chuck-dev`, `display_name: chuck-dev` and
+`command: /chuck-dev`, invite it to `#chuck-dev`, and put its tokens and
+`#chuck-dev`'s ID (as both channel variables) in your local `.env`. Run
+locally with `set -a; . ./.env; set +a; make run`.

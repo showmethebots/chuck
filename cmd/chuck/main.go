@@ -11,6 +11,10 @@
 //	PORT                       HTTP listen port (default 8080)
 //	GITHUB_APP_WEBHOOK_SECRET  turns on POST /webhooks/github; deliveries must be signed with it
 //	ANTHROPIC_API_KEY          turns on Haiku triage
+//	SLACK_BOT_TOKEN            Slack bot token (xoxb-); with the next three, turns on Slack
+//	SLACK_APP_TOKEN            Slack app-level token (xapp-) for Socket Mode
+//	CHUCK_SLACK_MAIN_CHANNEL   channel ID for approvals, the daily summary, and notices
+//	CHUCK_SLACK_SHADOW_CHANNEL channel ID for grade posts
 package main
 
 import (
@@ -21,6 +25,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -30,6 +35,7 @@ import (
 	"github.com/orionsbelt-dev/chuck/internal/daemon"
 	"github.com/orionsbelt-dev/chuck/internal/events"
 	"github.com/orionsbelt-dev/chuck/internal/memory"
+	"github.com/orionsbelt-dev/chuck/internal/notify"
 	"github.com/orionsbelt-dev/chuck/internal/triage"
 )
 
@@ -86,6 +92,9 @@ func runDaemon(ctx context.Context, log *slog.Logger, getenv func(string) string
 	if err != nil {
 		return err
 	}
+	if in.Slack != nil && cfg.Slack == nil {
+		return fmt.Errorf("slack is on but %s is missing from %s", config.SlackFile, configDir)
+	}
 
 	dbPath := envOr(getenv, "CHUCK_DB_PATH", "data/chuck.db")
 	store, err := memory.Open(ctx, dbPath)
@@ -123,6 +132,17 @@ func runDaemon(ctx context.Context, log *slog.Logger, getenv func(string) string
 		}
 		d.Background = append(d.Background, tr.Run)
 	}
+	if in.Slack != nil {
+		sc := notify.NewSlack(in.Slack.BotToken, in.Slack.AppToken, log)
+		ob := &notify.Outbox{Store: store, Poster: sc, MainChannel: in.Slack.MainChannel,
+			ShadowChannel: in.Slack.ShadowChannel, Log: log}
+		ix := &notify.Interactions{Store: store, Allow: cfg.Slack, Poster: sc, MainChannel: in.Slack.MainChannel,
+			HaikuBudget: cfg.Policy.Budgets.DailyUSD[config.TierHaiku], Version: version, Log: log}
+		d.Background = append(d.Background,
+			func(ctx context.Context) { ob.Run(ctx, 5*time.Second) },
+			func(ctx context.Context) { sc.Run(ctx, ix) },
+		)
+	}
 	return d.Run(ctx, ln)
 }
 
@@ -138,13 +158,39 @@ func envOr(getenv func(string) string, key, def string) string {
 type integrations struct {
 	WebhookSecret string
 	AnthropicKey  string
+	Slack         *slackEnv // nil when Slack is off
 }
 
+type slackEnv struct {
+	BotToken, AppToken, MainChannel, ShadowChannel string
+}
+
+var slackVars = []string{"SLACK_BOT_TOKEN", "SLACK_APP_TOKEN", "CHUCK_SLACK_MAIN_CHANNEL", "CHUCK_SLACK_SHADOW_CHANNEL"}
+
 func loadIntegrations(getenv func(string) string) (integrations, error) {
-	return integrations{
+	in := integrations{
 		WebhookSecret: getenv("GITHUB_APP_WEBHOOK_SECRET"),
 		AnthropicKey:  getenv("ANTHROPIC_API_KEY"),
-	}, nil
+	}
+	var set, missing []string
+	for _, k := range slackVars {
+		if getenv(k) == "" {
+			missing = append(missing, k)
+		} else {
+			set = append(set, k)
+		}
+	}
+	if len(set) > 0 && len(missing) > 0 {
+		return in, fmt.Errorf("partial Slack setup: %s set but %s missing",
+			strings.Join(set, ", "), strings.Join(missing, ", "))
+	}
+	if len(set) > 0 {
+		in.Slack = &slackEnv{
+			BotToken: getenv("SLACK_BOT_TOKEN"), AppToken: getenv("SLACK_APP_TOKEN"),
+			MainChannel: getenv("CHUCK_SLACK_MAIN_CHANNEL"), ShadowChannel: getenv("CHUCK_SLACK_SHADOW_CHANNEL"),
+		}
+	}
+	return in, nil
 }
 
 // names lists the integrations that are on, for logs and /healthz.
@@ -155,6 +201,9 @@ func (in integrations) names() []string {
 	}
 	if in.AnthropicKey != "" {
 		n = append(n, "triage")
+	}
+	if in.Slack != nil {
+		n = append(n, "slack")
 	}
 	return n
 }
