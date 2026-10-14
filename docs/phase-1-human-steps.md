@@ -100,6 +100,11 @@ backstop if that ever fails.
    `"integrations":["github_webhook","triage"]`, and `queue_depth` falls to
    near 0 within a few minutes as the backlog from section 1 is triaged.
    `fly logs -c deploy/fly.toml | grep '"msg":"decision"'` shows decisions.
+   If instead `fly logs` repeats `classifier unavailable; triage backs off`
+   with an error such as `authentication_error`, the key is wrong or Anthropic
+   is down. Triage is pausing itself (1 minute, then every 5 minutes) and no
+   events are lost or marked failed: fix the key with `fly secrets set` as in
+   step 3 and triage resumes on its own.
 
 ## 3. Slack (after the slice C PR merges and deploys)
 
@@ -173,10 +178,19 @@ fly secrets set -c deploy/fly.toml \
 2. In `#chuck`: `/chuck status` replies (only you see it) with `running`.
 3. Grade posts start appearing in `#chuck-shadow` as events arrive.
 
+Expect a burst on the first connection. Every decision queued since triage
+went live (section 2) posts now: grade posts in `#chuck-shadow` and approval
+requests in `#chuck`, about 20 every 5 seconds until the backlog clears.
+`fly logs` may show Slack rate-limit warnings while it drains; posts that hit
+one are retried, not lost. These are real decisions: grade them, and they
+count toward the 100-graded target. Old approval requests can be answered or
+ignored.
+
 ### 3.6 Second Slack account
 
 For the live checklist (section 4). Invite a second email address of yours to
-the workspace, sign in as it in another browser profile, join `#chuck`, and
+the workspace, sign in as it in another browser profile, join both `#chuck`
+and `#chuck-shadow` (the checklist clicks buttons in `#chuck-shadow`), and
 copy its member ID as in 3.3. Do not add it to `config/slack.yaml` yet.
 
 ### 3.7 Dev app (can wait until local testing)
