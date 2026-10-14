@@ -100,8 +100,10 @@ inbound surfaces are the unauthenticated `GET /healthz` behind Fly's HTTPS
 proxy (version and boot count only) and `POST /webhooks/github`
 (`internal/events`), which verifies GitHub's `X-Hub-Signature-256` with
 HMAC-SHA256 against `GITHUB_APP_WEBHOOK_SECRET` — an empty secret rejects
-every request rather than opening the endpoint — and caps the body at
-25 MB. chuck also makes an outbound Slack Socket Mode connection; inbound
+every request rather than opening the endpoint — caps the body at 25 MB,
+reads at most 2 bodies at once, and (via the server's 30 s `ReadTimeout`)
+bounds how long a sender may take, so concurrent or slow requests cannot
+exhaust the 256 MB Machine. chuck also makes an outbound Slack Socket Mode connection; inbound
 commands and button clicks on it are checked against the `config/slack.yaml`
 allowlist before anything else happens (`internal/notify`, enforced with
 `internal/config`'s `Slack.RoleOf`). What matters is the Fly app, its
