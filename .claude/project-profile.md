@@ -104,9 +104,10 @@ every request rather than opening the endpoint — caps the body at 25 MB,
 reads at most 2 bodies at once into exactly-sized buffers, and gives a
 sender holding a read slot 10 s to finish. The body is read before the
 signature can be checked, so unsigned senders can still cause memory
-pressure (measured locally at about 127 MB peak against the 256 MB
+pressure (measured locally at about 127 MB peak against the 512 MB
 Machine) and can occupy both read slots; turning away non-GitHub senders
-before reading is the complete fix. chuck also makes an outbound Slack Socket Mode connection; inbound
+before reading is the complete fix (issue #6). chuck also makes an
+outbound Slack Socket Mode connection; inbound
 commands and button clicks on it are checked against the `config/slack.yaml`
 allowlist before anything else happens (`internal/notify`, enforced with
 `internal/config`'s `Slack.RoleOf`). What matters is the Fly app, its
