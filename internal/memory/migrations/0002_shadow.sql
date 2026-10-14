@@ -75,7 +75,7 @@ CREATE TABLE messages (
 CREATE TABLE control (
 	id            INTEGER PRIMARY KEY CHECK (id = 1),
 	paused        INTEGER NOT NULL DEFAULT 0,
-	reason        TEXT,
+	reason        TEXT CHECK (reason IN ('pause', 'kill')),
 	by_slack_user TEXT,
 	changed_at    TEXT
 );
