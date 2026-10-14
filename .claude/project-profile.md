@@ -101,9 +101,12 @@ proxy (version and boot count only) and `POST /webhooks/github`
 (`internal/events`), which verifies GitHub's `X-Hub-Signature-256` with
 HMAC-SHA256 against `GITHUB_APP_WEBHOOK_SECRET` — an empty secret rejects
 every request rather than opening the endpoint — caps the body at 25 MB,
-reads at most 2 bodies at once, and (via the server's 30 s `ReadTimeout`)
-bounds how long a sender may take, so concurrent or slow requests cannot
-exhaust the 256 MB Machine. chuck also makes an outbound Slack Socket Mode connection; inbound
+reads at most 2 bodies at once into exactly-sized buffers, and gives a
+sender holding a read slot 10 s to finish. The body is read before the
+signature can be checked, so unsigned senders can still cause memory
+pressure (measured locally at about 127 MB peak against the 256 MB
+Machine) and can occupy both read slots; turning away non-GitHub senders
+before reading is the complete fix. chuck also makes an outbound Slack Socket Mode connection; inbound
 commands and button clicks on it are checked against the `config/slack.yaml`
 allowlist before anything else happens (`internal/notify`, enforced with
 `internal/config`'s `Slack.RoleOf`). What matters is the Fly app, its
