@@ -47,7 +47,8 @@ type GitHub struct {
 	Store  GitHubStore
 	Log    *slog.Logger
 	Now    func() time.Time // nil means time.Now
-	// BodyTimeout bounds how long a request may hold a read slot; 0 means 10 s.
+	// BodyTimeout bounds how long a request may wait for a read slot and then
+	// how long it may hold one; 0 means 10 s.
 	BodyTimeout time.Duration
 
 	slotsOnce sync.Once
@@ -55,19 +56,31 @@ type GitHub struct {
 }
 
 func (g *GitHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// Wait at most bodyTimeout for a slot. GitHub gives up on a delivery after
+	// 10 s anyway, and the bound stops a queued connection from holding a
+	// goroutine indefinitely. A client that disconnects while queued is not
+	// noticed here: net/http only detects a disconnect once the body has been
+	// read, so r.Context() does not end the wait.
 	g.slotsOnce.Do(func() { g.slots = make(chan struct{}, maxInFlight) })
+	wait := time.NewTimer(g.bodyTimeout())
 	select {
 	case g.slots <- struct{}{}:
+		wait.Stop()
 		defer func() { <-g.slots }()
-	case <-r.Context().Done():
+	case <-wait.C:
+		g.Log.Warn("github webhook rejected", "reason", "no read slot free", "delivery", r.Header.Get("X-GitHub-Delivery"))
 		http.Error(w, "busy", http.StatusServiceUnavailable)
 		return
 	}
 
 	// A sender that holds a slot must finish quickly: GitHub itself gives up
-	// on a delivery after 10 s, so anything slower is not GitHub. Recorders in
-	// tests do not support deadlines; that error is ignored.
-	_ = http.NewResponseController(w).SetReadDeadline(time.Now().Add(g.bodyTimeout()))
+	// on a delivery after 10 s, so anything slower is not GitHub. This
+	// deadline replaces the server's ReadTimeout for the body read. Test
+	// recorders do not support deadlines; any other failure to set it is
+	// logged, since it would leave the slot unbounded.
+	if err := http.NewResponseController(w).SetReadDeadline(time.Now().Add(g.bodyTimeout())); err != nil && !errors.Is(err, http.ErrNotSupported) {
+		g.Log.Warn("github webhook: could not set body read deadline", "err", err.Error())
+	}
 
 	body, err := readBody(w, r)
 	if err != nil {

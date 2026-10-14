@@ -278,10 +278,17 @@ func TestWebhookLimitsBodiesInFlight(t *testing.T) {
 	}
 }
 
-func TestWebhookGivesUpWaitingWhenClientLeaves(t *testing.T) {
+// The wait for a slot is bounded: a request still queued after BodyTimeout
+// gets a 503. GitHub gives up after 10 s anyway, and the bound keeps each
+// queued connection from holding a goroutine indefinitely. (A client that
+// disconnects while queued is not noticed: net/http only detects it after
+// the body has been read.)
+func TestWebhookQueuedRequestTimesOut(t *testing.T) {
 	h := newHook(&fakeStore{}, "k")
+	h.BodyTimeout = 100 * time.Millisecond
 	var releases []chan struct{}
 	for i := 0; i < maxInFlight; i++ {
+		// Recorders ignore read deadlines, so these hold their slots until released.
 		b := &blockingBody{started: make(chan struct{}), release: make(chan struct{})}
 		releases = append(releases, b.release)
 		go h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/webhooks/github", b))
@@ -293,12 +300,14 @@ func TestWebhookGivesUpWaitingWhenClientLeaves(t *testing.T) {
 		}
 	}()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
 	w := httptest.NewRecorder()
-	h.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/webhooks/github", strings.NewReader("{}")).WithContext(ctx))
+	start := time.Now()
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/webhooks/github", strings.NewReader("{}")))
 	if w.Code != http.StatusServiceUnavailable {
-		t.Fatalf("status = %d, want 503 for a client that gave up waiting", w.Code)
+		t.Fatalf("status = %d, want 503 for a request that waited past BodyTimeout", w.Code)
+	}
+	if waited := time.Since(start); waited < h.BodyTimeout || waited > 2*time.Second {
+		t.Fatalf("waited %v, want about BodyTimeout (%v)", waited, h.BodyTimeout)
 	}
 }
 

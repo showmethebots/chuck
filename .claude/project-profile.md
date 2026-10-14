@@ -96,8 +96,19 @@ to `main` deploys to production through the `production` environment.
 ## Threat model
 
 The repo ships a container image to a single Fly Machine (`chuck`).
-Its only inbound surface is an unauthenticated `GET /healthz` behind Fly's
-HTTPS proxy, which returns the version and boot count. What matters is the
+Its inbound surfaces, both behind Fly's HTTPS proxy, are an unauthenticated
+`GET /healthz` (status, version, boot count, which integrations are on,
+queue depth) and, when `GITHUB_APP_WEBHOOK_SECRET` is set,
+`POST /webhooks/github` (`internal/events`). The webhook verifies GitHub's
+`X-Hub-Signature-256` with HMAC-SHA256 (an empty secret rejects every
+request), caps bodies at 25 MB, reads at most 2 at once into exactly-sized
+buffers, bounds both the wait for a read slot and the read itself at 10 s,
+and stores the delivery verbatim with signature headers removed. The body
+is read before the signature can be checked, so unsigned senders can cause
+memory pressure (about 127 MB peak measured locally, against a 512 MB
+Machine) and can occupy both read slots; turning away non-GitHub senders
+before reading is the complete fix (issue #6). Stored events are untrusted
+input to later phases. What matters is the
 Fly app, its volume, and the Tigris bucket holding the replicated state. The
 control that guards them is credential custody. `FLY_API_TOKEN` is an
 app-scoped deploy token that only the CI `deploy` job can reach, through the
@@ -118,6 +129,7 @@ consumes it.
 | `config/**` | authorization |
 | `internal/config/**` | authorization |
 | `internal/daemon/**` | client-data, auth-session |
+| `internal/events/**` | secrets, client-data |
 | `internal/memory/**` | client-data |
 | `cmd/**` | secrets, client-data |
 | `deploy/**` | auth-session, secrets, supply-chain |
@@ -133,9 +145,12 @@ ci-workflows
 
 ## Identity model
 
-There are no end users. The daemon's HTTP server has no authentication, so
-any route added to `internal/daemon` is public through Fly's proxy
-(`deploy/fly.toml` `[http_service]`, `force_https`). Deploys authenticate to
+There are no end users. The daemon's HTTP server has no authentication of
+its own, so any route added to `internal/daemon` is public through Fly's
+proxy (`deploy/fly.toml` `[http_service]`, `force_https`). The GitHub
+webhook authenticates each delivery by its HMAC signature with
+`GITHUB_APP_WEBHOOK_SECRET`, shared by the private read-only GitHub Apps
+that send to it. Deploys authenticate to
 Fly with an app-scoped `FLY_API_TOKEN` deploy token, which is stored on the
 `production` GitHub environment. Litestream authenticates to Tigris with
 `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`, which `fly storage create`
@@ -144,8 +159,9 @@ with their own Fly account.
 
 ## Secrets policy
 
-Real secrets live in two places only: Fly app secrets (`BUCKET_NAME` and the
-`AWS_*` Tigris credentials) and the GitHub `production` environment
+Real secrets live in two places only: Fly app secrets (`BUCKET_NAME`, the
+`AWS_*` Tigris credentials, and `GITHUB_APP_WEBHOOK_SECRET`) and the GitHub
+`production` environment
 (`FLY_API_TOKEN`). `deploy/fly.toml` `[env]`, `Dockerfile` `ENV` and
 `config/*.yaml` are committed and baked into the image, so they hold
 non-secret settings only. Never commit a secret, a `.db` file or `data/`.
