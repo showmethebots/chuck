@@ -87,13 +87,16 @@ func (s *Slack) dispatch(ctx context.Context, sm *socketmode.Client, evt socketm
 			return
 		}
 		reply := h.Command(ctx, cmd.UserID, cmd.ChannelID, cmd.Text)
-		var err error
-		if reply == "" {
-			err = sm.Ack(*evt.Request)
-		} else {
-			err = sm.Ack(*evt.Request, map[string]any{"response_type": "ephemeral", "text": reply})
+		// Ack with ctx, not Ack's own context.TODO(): Ack blocks on the
+		// client's response channel, and Run cancels connCtx (which ctx
+		// derives from) as soon as RunContext returns, after the response
+		// sender has stopped. An Ack reached after that point would
+		// otherwise block forever and leak this goroutine.
+		var payload any
+		if reply != "" {
+			payload = map[string]any{"response_type": "ephemeral", "text": reply}
 		}
-		if err != nil {
+		if err := sm.AckCtx(ctx, evt.Request.EnvelopeID, payload); err != nil {
 			s.log.Error("ack slash command", "err", err.Error())
 		}
 	case socketmode.EventTypeInteractive:
@@ -101,7 +104,7 @@ func (s *Slack) dispatch(ctx context.Context, sm *socketmode.Client, evt socketm
 		if !ok || evt.Request == nil {
 			return
 		}
-		if err := sm.Ack(*evt.Request); err != nil {
+		if err := sm.AckCtx(ctx, evt.Request.EnvelopeID, nil); err != nil {
 			s.log.Error("ack interaction", "err", err.Error())
 		}
 		if cb.Type != slack.InteractionTypeBlockActions {
