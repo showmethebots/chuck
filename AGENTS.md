@@ -12,9 +12,16 @@ conventions the code already depends on.
   is what keeps Clark as the gate on every action listed under `ask_first` in
   `config/policy.yaml`. Don't weaken it, bypass it, or add a code path that
   takes one of those actions without going through it.
-- **Config decoding is strict.** `routes.yaml` and `policy.yaml` decode with
-  `KnownFields(true)`, and validation reports every problem at once through
-  `errors.Join`. A new config field needs a validation rule and a test.
+- **The Slack allowlist is `config/slack.yaml`, changed only by PR.** No
+  chat command or runtime path adds a user or changes a role. Every inbound
+  Slack interaction is checked against it before anything else happens.
+- **Phase 1 executes nothing.** Approvals are recorded; no code path acts
+  on GitHub, Notion, or anywhere else because of a decision or an
+  approval.
+- **Config decoding is strict.** `routes.yaml`, `policy.yaml`, and
+  `slack.yaml` decode with `KnownFields(true)`, and validation reports every
+  problem at once through `errors.Join`. A new config field needs a
+  validation rule and a test.
   Validation must keep collecting errors rather than stopping at the first.
 - **Every action a route names is declared in `policy.yaml`, in exactly one
   permission tier.**
@@ -43,3 +50,8 @@ conventions the code already depends on.
 - A push to `main` deploys to production through the CI `deploy` job.
 - `fly.toml` is at `deploy/fly.toml`, not the repo root. Every app-scoped
   `fly` command needs `-c deploy/fly.toml`.
+- Manual steps a person must take for a phase live in
+  `docs/phase-N-human-steps.md`, not in a README, in the order they become
+  possible.
+- Integrations turn on independently from the environment (see the
+  `cmd/chuck` doc comment). A partial Slack setup refuses to start.

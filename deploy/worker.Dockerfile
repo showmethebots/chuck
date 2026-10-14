@@ -1,5 +1,5 @@
 # Worker image: one Claude Code headless task per ephemeral Fly Machine.
-# Phase 0 only builds this image (CI checks that it builds); nothing runs it
+# Phase 1 only builds this image (CI checks that it builds); nothing runs it
 # until Phase 3.
 
 FROM golang:1.27-trixie AS go

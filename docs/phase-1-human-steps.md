@@ -185,3 +185,33 @@ Repeat 3.2 with `name: chuck-dev`, `display_name: chuck-dev` and
 `command: /chuck-dev`, invite it to `#chuck-dev`, and put its tokens and
 `#chuck-dev`'s ID (as both channel variables) in your local `.env`. Run
 locally with `set -a; . ./.env; set +a; make run`.
+
+## 4. Live checklist (after section 3)
+
+Run `docs/shadow-checklist.md` start to finish with your owner account and
+the second account. Report anything that differs in the chuck session.
+
+## 5. The shadow week
+
+The week starts once the checklist passes.
+
+- **Daily:** grade the posts in `#chuck-shadow` and answer approvals in
+  `#chuck`. Grade what chuck would do, not whether the event mattered: 👍
+  when the proposed action (or "nothing") is what you would want, 👎 when
+  it is not. The daily summary in `#chuck` tracks progress against the exit
+  criterion.
+- **If grading is too much:** say so in the chuck session; the sample size
+  (`CHUCK_GRADE_SAMPLE`) and the noise rules can change.
+- **End of week:** with at least 100 graded decisions, run the replay on
+  the live database (read-only):
+
+  ```sh
+  fly ssh console -c deploy/fly.toml -C "env CHUCK_CONFIG_DIR=/app/config chuck replay --db /data/chuck.db"
+  ```
+
+  If the report says it stopped early, re-run with a higher `--max-usd`
+  (the default cap is $1).
+
+  Exit needs, together: 7 days running, at least 100 graded, at least 90%
+  👍, zero 👎 on `ask_first` proposals, `0 violations` on the daily
+  summary's Allowlist line, and the replay's `👍 agreement` at least 90%.
