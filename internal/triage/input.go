@@ -95,7 +95,9 @@ func BuildInput(kind, repo string, payload []byte) (Input, error) {
 		in.Title, in.URL = item.Title, item.HTMLURL
 	}
 
-	var text, authored, author string // authored: what the sender wrote for this event; author: who wrote it
+	// authored is the review, comment or issue/PR body the event carries;
+	// author is who wrote that text, which need not be the event's sender.
+	var text, authored, author string
 	switch {
 	case p.Review != nil:
 		authored = p.Review.Body

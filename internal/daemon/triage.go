@@ -23,7 +23,8 @@ type TriageStore interface {
 // recorded as triage_failed.
 const maxAttempts = 3
 
-// retryAfter is the wait after the nth failed attempt.
+// retryAfter is the wait after the nth failed attempt at one event, and
+// after the nth consecutive systemic classifier failure.
 func retryAfter(n int) time.Duration {
 	if n <= 1 {
 		return time.Minute
@@ -44,6 +45,10 @@ type Triage struct {
 	OnBudgetHit func(ctx context.Context, spent, budget float64)
 
 	budgetDay string
+	// systemicFails counts consecutive systemic classifier failures; while
+	// now is before blockedUntil, Step leaves the queue alone.
+	systemicFails int
+	blockedUntil  time.Time
 }
 
 func (t *Triage) now() time.Time {
@@ -86,6 +91,9 @@ func (t *Triage) Step(ctx context.Context) (bool, error) {
 		return false, err
 	}
 	now := t.now()
+	if now.Before(t.blockedUntil) {
+		return false, nil
+	}
 	start := dayStart(now)
 	spent, err := t.Store.SpendSince(ctx, start)
 	if err != nil {
@@ -108,6 +116,23 @@ func (t *Triage) Step(ctx context.Context) (bool, error) {
 		return false, err
 	}
 	v, err := triage.Decide(ctx, ev.Kind, ev.Repo, ev.Payload, t.Classifier, t.Policy)
+	if triage.Systemic(err) {
+		// Not this event's fault: charging it an attempt would fail the
+		// whole backlog within minutes. Pause the loop instead.
+		if ctx.Err() != nil {
+			return false, nil // shutting down; nothing to back off from
+		}
+		t.systemicFails++
+		backoff := retryAfter(t.systemicFails)
+		t.blockedUntil = now.Add(backoff)
+		t.Log.Error("classifier unavailable; triage backs off", "event_id", ev.ID,
+			"consecutive", t.systemicFails, "backoff", backoff.String(), "err", err.Error())
+		return false, nil
+	}
+	if err == nil && v.Stage == memory.StageHaiku {
+		// The classifier is reachable again (a rule drop never calls it).
+		t.systemicFails = 0
+	}
 	if err != nil {
 		n, ferr := t.Store.FailAttempt(ctx, ev.ID, now.Add(retryAfter(ev.Attempts+1)))
 		if ferr != nil {
