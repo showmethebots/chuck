@@ -39,7 +39,7 @@ type Daemon struct {
 // every background job has returned.
 func (d *Daemon) Run(ctx context.Context, ln net.Listener) error {
 	d.started = time.Now()
-	srv := &http.Server{Handler: d.Handler(), ReadHeaderTimeout: 10 * time.Second}
+	srv := d.server()
 
 	jobCtx, stopJobs := context.WithCancel(ctx)
 	var wg sync.WaitGroup
@@ -87,6 +87,17 @@ func (d *Daemon) integrations() []string {
 		return []string{}
 	}
 	return d.Integrations
+}
+
+// server bounds how long a client may take to send a request. ReadTimeout
+// covers the body too, so a slow sender cannot hold a webhook body buffer
+// open indefinitely; GitHub itself gives up on a delivery after 10 s.
+func (d *Daemon) server() *http.Server {
+	return &http.Server{
+		Handler:           d.Handler(),
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+	}
 }
 
 // Handler serves the daemon's HTTP endpoints.

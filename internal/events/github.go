@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/orionsbelt-dev/chuck/internal/memory"
@@ -19,6 +20,13 @@ import (
 
 // maxBody is GitHub's own cap on a webhook payload.
 const maxBody = 25 << 20
+
+// maxInFlight bounds how many webhook bodies are read at once. The body must
+// be read in full before its signature can be checked, each can be up to
+// maxBody, and the Machine has 256 MB, so unbounded concurrent (or slow)
+// requests could exhaust memory. Extra requests wait for a slot instead of
+// failing, because GitHub does not retry failed App deliveries.
+const maxInFlight = 2
 
 // GitHubStore is the part of memory.Store the webhook needs.
 type GitHubStore interface {
@@ -32,9 +40,21 @@ type GitHub struct {
 	Store  GitHubStore
 	Log    *slog.Logger
 	Now    func() time.Time // nil means time.Now
+
+	slotsOnce sync.Once
+	slots     chan struct{}
 }
 
 func (g *GitHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	g.slotsOnce.Do(func() { g.slots = make(chan struct{}, maxInFlight) })
+	select {
+	case g.slots <- struct{}{}:
+		defer func() { <-g.slots }()
+	case <-r.Context().Done():
+		http.Error(w, "busy", http.StatusServiceUnavailable)
+		return
+	}
+
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBody))
 	if err != nil {
 		http.Error(w, "body too large", http.StatusRequestEntityTooLarge)

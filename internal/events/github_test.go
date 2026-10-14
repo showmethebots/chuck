@@ -14,6 +14,8 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -206,5 +208,92 @@ func TestWebhookStoreFailureIs500(t *testing.T) {
 	w := deliver(newHook(&fakeStore{err: errors.New("disk full")}, "k"), "issues", "d-1", sign([]byte("k"), body), body)
 	if w.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want 500", w.Code)
+	}
+}
+
+// blockingBody blocks reads until released, and reports when a read starts.
+type blockingBody struct {
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (b *blockingBody) Read([]byte) (int, error) {
+	b.once.Do(func() { close(b.started) })
+	<-b.release
+	return 0, io.EOF
+}
+
+// Each body can be up to maxBody and the Machine has 256 MB, so only
+// maxInFlight bodies are read at once; further requests wait their turn
+// rather than being rejected (GitHub does not retry failed deliveries).
+func TestWebhookLimitsBodiesInFlight(t *testing.T) {
+	h := newHook(&fakeStore{}, "k")
+	send := func(body io.Reader, done chan<- struct{}) {
+		r := httptest.NewRequest(http.MethodPost, "/webhooks/github", body)
+		h.ServeHTTP(httptest.NewRecorder(), r)
+		close(done)
+	}
+
+	var held []*blockingBody
+	var heldDone []chan struct{}
+	for i := 0; i < maxInFlight; i++ {
+		b := &blockingBody{started: make(chan struct{}), release: make(chan struct{})}
+		done := make(chan struct{})
+		go send(b, done)
+		select {
+		case <-b.started:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("request %d never started reading", i)
+		}
+		held, heldDone = append(held, b), append(heldDone, done)
+	}
+
+	extra := &blockingBody{started: make(chan struct{}), release: make(chan struct{})}
+	close(extra.release)
+	extraDone := make(chan struct{})
+	go send(extra, extraDone)
+	select {
+	case <-extra.started:
+		t.Fatal("a request beyond maxInFlight started reading its body")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(held[0].release)
+	<-heldDone[0]
+	select {
+	case <-extraDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("waiting request did not proceed once a slot freed")
+	}
+	for _, b := range held[1:] {
+		close(b.release)
+	}
+	for _, d := range heldDone[1:] {
+		<-d
+	}
+}
+
+func TestWebhookGivesUpWaitingWhenClientLeaves(t *testing.T) {
+	h := newHook(&fakeStore{}, "k")
+	var releases []chan struct{}
+	for i := 0; i < maxInFlight; i++ {
+		b := &blockingBody{started: make(chan struct{}), release: make(chan struct{})}
+		releases = append(releases, b.release)
+		go h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/webhooks/github", b))
+		<-b.started
+	}
+	defer func() {
+		for _, r := range releases {
+			close(r)
+		}
+	}()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/webhooks/github", strings.NewReader("{}")).WithContext(ctx))
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503 for a client that gave up waiting", w.Code)
 	}
 }
