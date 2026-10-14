@@ -134,3 +134,88 @@ func TestHealthzBody(t *testing.T) {
 		t.Fatalf("body = %+v", body)
 	}
 }
+
+func TestWebhookRouteOnlyWhenConfigured(t *testing.T) {
+	d := newDaemon(&syncBuffer{})
+	rec := httptest.NewRecorder()
+	d.Handler().ServeHTTP(rec, httptest.NewRequest("POST", "/webhooks/github", strings.NewReader("{}")))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("unconfigured webhook: status %d, want 404", rec.Code)
+	}
+
+	d.Webhook = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusAccepted) })
+	rec = httptest.NewRecorder()
+	d.Handler().ServeHTTP(rec, httptest.NewRequest("POST", "/webhooks/github", strings.NewReader("{}")))
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("configured webhook: status %d, want 202", rec.Code)
+	}
+}
+
+func TestHealthzReportsIntegrationsAndQueue(t *testing.T) {
+	d := newDaemon(&syncBuffer{})
+	d.Integrations = []string{"github_webhook"}
+	d.QueueDepth = func(context.Context) (int, error) { return 4, nil }
+	rec := httptest.NewRecorder()
+	d.Handler().ServeHTTP(rec, httptest.NewRequest("GET", "/healthz", nil))
+
+	var body struct {
+		Integrations []string `json:"integrations"`
+		QueueDepth   *int     `json:"queue_depth"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Integrations) != 1 || body.Integrations[0] != "github_webhook" {
+		t.Errorf("integrations = %v", body.Integrations)
+	}
+	if body.QueueDepth == nil || *body.QueueDepth != 4 {
+		t.Errorf("queue_depth = %v, want 4", body.QueueDepth)
+	}
+}
+
+func TestHealthzListsNoIntegrationsAsEmpty(t *testing.T) {
+	rec := httptest.NewRecorder()
+	newDaemon(&syncBuffer{}).Handler().ServeHTTP(rec, httptest.NewRequest("GET", "/healthz", nil))
+	if !strings.Contains(rec.Body.String(), `"integrations":[]`) {
+		t.Fatalf("body = %s, want integrations: []", rec.Body.String())
+	}
+}
+
+func TestRunStopsBackgroundJobs(t *testing.T) {
+	d := newDaemon(&syncBuffer{})
+	started := make(chan struct{})
+	stopped := make(chan struct{})
+	d.Background = []func(context.Context){func(ctx context.Context) {
+		close(started)
+		<-ctx.Done()
+		close(stopped)
+	}}
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- d.Run(ctx, ln) }()
+	<-started
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run did not return")
+	}
+	select {
+	case <-stopped:
+	default:
+		t.Fatal("Run returned before the background job stopped")
+	}
+}
+
+// A slow client must not hold a request (and its webhook body buffer) open
+// indefinitely: the whole request, body included, has a deadline.
+func TestServerBoundsRequestReadTime(t *testing.T) {
+	srv := newDaemon(&syncBuffer{}).server()
+	if srv.ReadHeaderTimeout <= 0 || srv.ReadTimeout <= 0 {
+		t.Fatalf("ReadHeaderTimeout=%v ReadTimeout=%v; both must be set", srv.ReadHeaderTimeout, srv.ReadTimeout)
+	}
+}

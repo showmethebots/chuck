@@ -1,0 +1,18 @@
+{
+  "action": "submitted",
+  "review": {
+    "state": "changes_requested",
+    "body": "This drops the error check on line 12.",
+    "html_url": "https://github.com/orionsbelt-dev/demos/pull/8#pullrequestreview-1"
+  },
+  "pull_request": {
+    "number": 8,
+    "title": "Fix refresh 404",
+    "body": "Closes #7",
+    "html_url": "https://github.com/orionsbelt-dev/demos/pull/8",
+    "state": "open",
+    "merged": false
+  },
+  "repository": {"full_name": "orionsbelt-dev/demos"},
+  "sender": {"login": "chatgpt-codex-connector[bot]", "type": "Bot"}
+}

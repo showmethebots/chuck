@@ -5,10 +5,11 @@
 //
 // Environment:
 //
-//	CHUCK_CONFIG_DIR  directory holding routes.yaml and policy.yaml (default ./config)
-//	CHUCK_DB_PATH     SQLite state file (default ./data/chuck.db)
-//	CHUCK_HEARTBEAT   heartbeat interval as a Go duration (default 1m)
-//	PORT              HTTP listen port (default 8080)
+//	CHUCK_CONFIG_DIR           directory holding routes.yaml and policy.yaml (default ./config)
+//	CHUCK_DB_PATH              SQLite state file (default ./data/chuck.db)
+//	CHUCK_HEARTBEAT            heartbeat interval as a Go duration (default 1m)
+//	PORT                       HTTP listen port (default 8080)
+//	GITHUB_APP_WEBHOOK_SECRET  turns on POST /webhooks/github; deliveries must be signed with it
 package main
 
 import (
@@ -24,6 +25,7 @@ import (
 
 	"github.com/orionsbelt-dev/chuck/internal/config"
 	"github.com/orionsbelt-dev/chuck/internal/daemon"
+	"github.com/orionsbelt-dev/chuck/internal/events"
 	"github.com/orionsbelt-dev/chuck/internal/memory"
 )
 
@@ -76,6 +78,11 @@ func runDaemon(ctx context.Context, log *slog.Logger, getenv func(string) string
 		return fmt.Errorf("CHUCK_HEARTBEAT: %w", err)
 	}
 
+	in, err := loadIntegrations(getenv)
+	if err != nil {
+		return err
+	}
+
 	dbPath := envOr(getenv, "CHUCK_DB_PATH", "data/chuck.db")
 	store, err := memory.Open(ctx, dbPath)
 	if err != nil {
@@ -95,7 +102,14 @@ func runDaemon(ctx context.Context, log *slog.Logger, getenv func(string) string
 	if err != nil {
 		return err
 	}
-	d := &daemon.Daemon{Log: log, Interval: interval, Version: version, BootCount: boots}
+	d := &daemon.Daemon{
+		Log: log, Interval: interval, Version: version, BootCount: boots,
+		Integrations: in.names(),
+		QueueDepth:   store.QueueDepth,
+	}
+	if in.WebhookSecret != "" {
+		d.Webhook = &events.GitHub{Secret: []byte(in.WebhookSecret), Store: store, Log: log}
+	}
 	return d.Run(ctx, ln)
 }
 
@@ -104,4 +118,23 @@ func envOr(getenv func(string) string, key, def string) string {
 		return v
 	}
 	return def
+}
+
+// integrations is what the environment switches on. Each turns on
+// independently so Phase 1 can deploy in slices.
+type integrations struct {
+	WebhookSecret string
+}
+
+func loadIntegrations(getenv func(string) string) (integrations, error) {
+	return integrations{WebhookSecret: getenv("GITHUB_APP_WEBHOOK_SECRET")}, nil
+}
+
+// names lists the integrations that are on, for logs and /healthz.
+func (in integrations) names() []string {
+	n := []string{}
+	if in.WebhookSecret != "" {
+		n = append(n, "github_webhook")
+	}
+	return n
 }

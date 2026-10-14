@@ -6,9 +6,10 @@ and keeps Project HQ current. The design lives in Notion (Project HQ →
 Autonomous project manager agent → Design & Plan); that page is the source
 of truth.
 
-**Status: Phase 0 (scaffold).** The daemon loads and validates config, opens
-its SQLite state, logs a heartbeat, and serves `/healthz`. It takes no
-actions yet.
+**Status: Phase 1 (shadow mode), in progress.** The daemon receives GitHub
+App webhooks at `POST /webhooks/github` and stores them. It takes no
+actions. Manual setup steps are in
+[docs/phase-1-human-steps.md](docs/phase-1-human-steps.md).
 
 ## Layout
 
@@ -16,6 +17,7 @@ actions yet.
 cmd/chuck/          entrypoint: `run` (daemon), `validate` (config check)
 internal/config/    routes.yaml + policy.yaml loader and schema validation
 internal/memory/    SQLite state (WAL, embedded migrations)
+internal/events/    GitHub webhook receiver
 internal/daemon/    heartbeat loop and HTTP endpoints
 config/             routes.yaml (routing rules), policy.yaml (permissions, budgets, caps)
 deploy/             fly.toml, Litestream config, entrypoint, worker image, restore check
