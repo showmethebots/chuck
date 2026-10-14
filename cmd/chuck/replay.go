@@ -22,6 +22,7 @@ func runReplay(ctx context.Context, args []string, getenv func(string) string, c
 	db := fs.String("db", "", "SQLite file to replay, opened read-only (required)")
 	since := fs.String("since", "", "only decisions on or after this UTC date, YYYY-MM-DD")
 	fake := fs.Bool("fake", false, "reuse stored model output instead of calling Haiku")
+	maxUSD := fs.Float64("max-usd", 1.00, "stop once Haiku spend reaches this many dollars; 0 means no cap")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -54,8 +55,10 @@ func runReplay(ctx context.Context, args []string, getenv func(string) string, c
 	}
 
 	var c triage.Classifier
+	spendCap := *maxUSD
 	if *fake {
 		c = triage.NewEchoClassifier(items)
+		spendCap = 0 // stored output costs nothing to replay
 	} else {
 		key := getenv("ANTHROPIC_API_KEY")
 		if key == "" {
@@ -64,6 +67,6 @@ func runReplay(ctx context.Context, args []string, getenv func(string) string, c
 		}
 		c = triage.NewHaiku(cfg.Policy, option.WithAPIKey(key))
 	}
-	_, _ = fmt.Fprint(stdout, triage.Replay(ctx, items, c, cfg.Policy).String())
+	_, _ = fmt.Fprint(stdout, triage.Replay(ctx, items, c, cfg.Policy, spendCap).String())
 	return 0
 }

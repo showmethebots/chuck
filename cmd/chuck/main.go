@@ -2,7 +2,7 @@
 //
 //	chuck run       start the daemon (default)
 //	chuck validate  load and validate config, then exit
-//	chuck replay    re-run graded events and report agreement (--db, --since, --fake)
+//	chuck replay    re-run graded events and report agreement (--db, --since, --fake, --max-usd)
 //
 // Environment:
 //

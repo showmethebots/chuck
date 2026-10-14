@@ -20,15 +20,28 @@ type ReplayRow struct {
 type ReplayReport struct {
 	Items   int
 	Errors  int // classifier calls that failed; those items are skipped
+	Total   int // graded items passed to Replay
+	Stopped bool
+	MaxUSD  float64 // the cap in effect when Stopped, for the report line
 	Rows    map[string]*ReplayRow
 	CostUSD float64
 }
 
 // Replay re-runs graded events through Decide with the current rules and
 // prompt. A 👍 decision should come out the same; a 👎 one should not.
-func Replay(ctx context.Context, items []memory.Graded, c Classifier, p config.Policy) ReplayReport {
-	r := ReplayReport{Rows: map[string]*ReplayRow{}}
+//
+// maxUSD caps how much a real Haiku run may spend: once accumulated
+// CostUSD reaches maxUSD, Replay stops before the next item and sets
+// Stopped. maxUSD <= 0 means no cap (used by tests and --fake, which costs
+// nothing). AGENTS.md requires every model tier to have a daily budget;
+// this is replay's.
+func Replay(ctx context.Context, items []memory.Graded, c Classifier, p config.Policy, maxUSD float64) ReplayReport {
+	r := ReplayReport{Rows: map[string]*ReplayRow{}, Total: len(items), MaxUSD: maxUSD}
 	for _, it := range items {
+		if maxUSD > 0 && r.CostUSD >= maxUSD {
+			r.Stopped = true
+			break
+		}
 		v, err := Decide(ctx, it.Event.Kind, it.Event.Repo, it.Event.Payload, c, p)
 		if err != nil {
 			r.Errors++
@@ -84,7 +97,12 @@ func pct(n, d int) string {
 
 func (r ReplayReport) String() string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "replay: %d graded decisions, %d classifier errors, cost $%.4f\n\n", r.Items, r.Errors, r.CostUSD)
+	fmt.Fprintf(&b, "replay: %d replayed, %d classifier errors, cost $%.4f\n", r.Items, r.Errors, r.CostUSD)
+	if r.Stopped {
+		fmt.Fprintf(&b, "stopped early: reached the --max-usd cap of $%.2f; %d of %d graded decisions not replayed\n",
+			r.MaxUSD, r.Total-r.Items-r.Errors, r.Total)
+	}
+	fmt.Fprint(&b, "\n")
 	keys := make([]string, 0, len(r.Rows))
 	for k := range r.Rows {
 		keys = append(keys, k)

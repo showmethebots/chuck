@@ -29,7 +29,7 @@ func TestReplayAgreementAndDivergence(t *testing.T) {
 	}
 	// The model now says "none" for issues: the 👍 issue disagrees, the 👎 one diverges.
 	c := &stubClassifier{raw: `{"category":"new_issue","would_do":"none","target":"","confidence":0.6,"rationale":"r"}`}
-	r := Replay(context.Background(), items, c, testPolicy())
+	r := Replay(context.Background(), items, c, testPolicy(), 0)
 	if r.Items != 3 || r.Errors != 0 {
 		t.Fatalf("items %d errors %d", r.Items, r.Errors)
 	}
@@ -48,8 +48,30 @@ func TestReplayAgreementAndDivergence(t *testing.T) {
 
 func TestEchoClassifierReproducesStoredDecisions(t *testing.T) {
 	items := []memory.Graded{gradedIssue(t, 1, commentRaw, "up")}
-	r := Replay(context.Background(), items, NewEchoClassifier(items), testPolicy())
+	r := Replay(context.Background(), items, NewEchoClassifier(items), testPolicy(), 0)
 	if !strings.Contains(r.String(), "👍 agreement: 100% (1/1)") {
+		t.Fatalf("report:\n%s", r.String())
+	}
+}
+
+// Each stub call costs 0.0015 (1000 input / 100 output tokens at Haiku
+// pricing, as in TestDecideOK). A $0.002 cap should let two calls through
+// (cumulative cost 0.0015, then 0.0030) and stop before the third.
+func TestReplayStopsAtMaxUSD(t *testing.T) {
+	items := []memory.Graded{
+		gradedIssue(t, 1, commentRaw, "up"),
+		gradedIssue(t, 2, commentRaw, "up"),
+		gradedIssue(t, 3, commentRaw, "up"),
+	}
+	c := &stubClassifier{raw: commentRaw}
+	r := Replay(context.Background(), items, c, testPolicy(), 0.002)
+	if r.Items != 2 || !r.Stopped {
+		t.Fatalf("items %d stopped %v", r.Items, r.Stopped)
+	}
+	if c.calls != 2 {
+		t.Fatalf("classifier called %d times, want 2", c.calls)
+	}
+	if !strings.Contains(r.String(), "stopped early") {
 		t.Fatalf("report:\n%s", r.String())
 	}
 }
