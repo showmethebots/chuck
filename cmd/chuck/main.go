@@ -2,6 +2,7 @@
 //
 //	chuck run       start the daemon (default)
 //	chuck validate  load and validate config, then exit
+//	chuck replay    re-run graded events and report agreement (--db, --since, --fake)
 //
 // Environment:
 //
@@ -74,8 +75,10 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout,
 			return 1
 		}
 		return 0
+	case "replay":
+		return runReplay(ctx, args[1:], getenv, configDir, stdout, stderr)
 	default:
-		_, _ = fmt.Fprintf(stderr, "unknown command %q; want run or validate\n", cmd)
+		_, _ = fmt.Fprintf(stderr, "unknown command %q; want run, validate, or replay\n", cmd)
 		return 2
 	}
 }
