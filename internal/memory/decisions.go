@@ -50,6 +50,7 @@ type DecisionView struct {
 	Grade            string // latest grade: "", "up", "down"
 	ApprovalResponse string // "", "approve", "deny"
 	ApprovalBy       string
+	URL              string // the event's GitHub page, or "" when the payload has none
 }
 
 // RecordDecision stores d and marks its event triaged, in one transaction.
@@ -100,12 +101,18 @@ func (s *Store) SpendSince(ctx context.Context, since time.Time) (float64, error
 	return usd, err
 }
 
+// viewQuery's last column is the event's GitHub page. payload is stored as a
+// BLOB, which SQLite's JSON functions first try to read as JSONB; the CAST
+// makes them read it as the text JSON it is. pull_request comes before issue
+// so review events link to the PR.
 const viewQuery = `SELECT d.id, d.event_id, d.stage, d.outcome, d.category, d.would_do, d.permission,
 	d.target, d.confidence, d.rationale, d.raw_output, d.model, d.input_tokens, d.output_tokens,
 	d.cost_usd, COALESCE(d.post_kind, ''), COALESCE(d.slack_channel, ''), COALESCE(d.slack_ts, ''),
 	d.created_at, e.repo, e.kind,
 	COALESCE((SELECT g.grade FROM grades g WHERE g.decision_id = d.id ORDER BY g.id DESC LIMIT 1), ''),
-	COALESCE(a.response, ''), COALESCE(a.responder_slack_user, '')
+	COALESCE(a.response, ''), COALESCE(a.responder_slack_user, ''),
+	COALESCE(CAST(e.payload AS TEXT) ->> '$.pull_request.html_url', CAST(e.payload AS TEXT) ->> '$.issue.html_url',
+		CAST(e.payload AS TEXT) ->> '$.workflow_run.html_url', CAST(e.payload AS TEXT) ->> '$.compare', '')
 	FROM decisions d
 	JOIN events e ON e.id = d.event_id
 	LEFT JOIN approvals a ON a.decision_id = d.id`
@@ -116,7 +123,7 @@ func scanView(sc scanner) (DecisionView, error) {
 	err := sc.Scan(&v.ID, &v.EventID, &v.Stage, &v.Outcome, &v.Category, &v.WouldDo, &v.Permission,
 		&v.Target, &v.Confidence, &v.Rationale, &v.RawOutput, &v.Model, &v.InputTokens, &v.OutputTokens,
 		&v.CostUSD, &v.PostKind, &v.SlackChannel, &v.SlackTS,
-		&created, &v.Repo, &v.Kind, &v.Grade, &v.ApprovalResponse, &v.ApprovalBy)
+		&created, &v.Repo, &v.Kind, &v.Grade, &v.ApprovalResponse, &v.ApprovalBy, &v.URL)
 	if err != nil {
 		return DecisionView{}, err
 	}

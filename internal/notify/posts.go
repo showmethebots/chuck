@@ -3,6 +3,7 @@ package notify
 import (
 	"fmt"
 	"strconv"
+	"unicode/utf8"
 
 	"github.com/slack-go/slack"
 
@@ -19,22 +20,41 @@ const (
 
 const shadowBanner = "SHADOW — nothing will execute."
 
+// Length bounds for model- and payload-supplied text. Slack rejects a section
+// over 3000 chars or a context element over 2000, and the outbox retries a
+// rejected post forever, holding up every post behind it.
+const (
+	maxRationale = 500
+	maxRef       = 300 // a target or a URL
+)
+
+// clip keeps the first n runes of s, marking a cut with "…".
+func clip(s string, n int) string {
+	if utf8.RuneCountInString(s) <= n {
+		return s
+	}
+	return string([]rune(s)[:n]) + "…"
+}
+
 func headline(v memory.DecisionView) string {
 	switch {
 	case v.Outcome == memory.OutcomeDropped:
-		return fmt.Sprintf("Dropped by rule `%s`", v.Rationale)
+		return fmt.Sprintf("Dropped by rule `%s`", clip(v.Rationale, maxRationale))
 	case v.Outcome == memory.OutcomeFailed:
 		return "Triage failed"
 	case v.WouldDo == "" || v.WouldDo == "none":
 		return "chuck would do nothing"
 	default:
-		return fmt.Sprintf("chuck would `%s` %s (%s)", v.WouldDo, v.Target, v.Permission)
+		return fmt.Sprintf("chuck would `%s` %s (%s)", v.WouldDo, clip(v.Target, maxRef), v.Permission)
 	}
 }
 
 // DecisionText is a decision post's notification and fallback text.
 func DecisionText(v memory.DecisionView) string {
 	text := fmt.Sprintf("%s %s: %s", v.Repo, v.Kind, headline(v))
+	if v.URL != "" {
+		text += " " + clip(v.URL, maxRef)
+	}
 	if v.PostKind == memory.PostApproval {
 		text = shadowBanner + " " + text
 	}
@@ -60,12 +80,16 @@ func DecisionBlocks(v memory.DecisionView) []slack.Block {
 	if v.Outcome != memory.OutcomeOK {
 		what = v.Outcome
 	}
+	about := fmt.Sprintf("%s · %s · %s · confidence %.2f", v.Repo, v.Kind, what, v.Confidence)
+	if v.URL != "" {
+		about += fmt.Sprintf(" · <%s>", clip(v.URL, maxRef))
+	}
 	blocks := []slack.Block{
 		slack.NewSectionBlock(md(head), nil, nil),
-		slack.NewContextBlock("", md(fmt.Sprintf("%s · %s · %s · confidence %.2f", v.Repo, v.Kind, what, v.Confidence))),
+		slack.NewContextBlock("", md(about)),
 	}
 	if v.Outcome == memory.OutcomeOK && v.Rationale != "" {
-		blocks = append(blocks, slack.NewSectionBlock(md("> "+v.Rationale), nil, nil))
+		blocks = append(blocks, slack.NewSectionBlock(md("> "+clip(v.Rationale, maxRationale)), nil, nil))
 	}
 
 	var status []string

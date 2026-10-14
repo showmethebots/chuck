@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"unicode/utf8"
+
+	"github.com/slack-go/slack"
 
 	"github.com/orionsbelt-dev/chuck/internal/memory"
 )
@@ -87,5 +90,55 @@ func TestQuietPosts(t *testing.T) {
 	none := render(t, view(memory.Decision{WouldDo: "none", Category: "noise", PostKind: memory.PostGrade}))
 	if !strings.Contains(none, "chuck would do nothing") {
 		t.Errorf("none:\n%s", none)
+	}
+}
+
+func TestQuietPostsLinkToEvent(t *testing.T) {
+	const url = "https://github.com/orionsbelt-dev/demos/issues/7"
+	for name, d := range map[string]memory.Decision{
+		"none":    {WouldDo: "none", Category: "noise", PostKind: memory.PostGrade},
+		"dropped": {Stage: memory.StageRule, Outcome: memory.OutcomeDropped, Rationale: "github_app_housekeeping", PostKind: memory.PostGrade},
+	} {
+		v := view(d)
+		v.URL = url
+		if got := render(t, v); !strings.Contains(got, "<"+url+">") {
+			t.Errorf("%s: blocks lack a link to the event:\n%s", name, got)
+		}
+		if got := DecisionText(v); !strings.Contains(got, url) {
+			t.Errorf("%s: fallback text lacks the link: %q", name, got)
+		}
+	}
+	if got := render(t, view(memory.Decision{WouldDo: "none", PostKind: memory.PostGrade})); strings.Contains(got, "<>") {
+		t.Errorf("empty URL rendered as a link:\n%s", got)
+	}
+}
+
+func TestPostBoundsLongFields(t *testing.T) {
+	long := strings.Repeat("é", 5000)
+	v := view(memory.Decision{WouldDo: "comment_issue", Permission: "act_freely", Target: "https://github.com/o/r/issues/7?" + long,
+		Category: "new_issue", Confidence: 0.8, Rationale: long, PostKind: memory.PostApproval})
+	v.URL = "https://github.com/o/r/issues/7#" + long
+	for _, b := range DecisionBlocks(v) {
+		switch b := b.(type) {
+		case *slack.SectionBlock:
+			if n := utf8.RuneCountInString(b.Text.Text); n > 3000 {
+				t.Errorf("section text is %d chars, Slack's limit is 3000", n)
+			}
+		case *slack.ContextBlock:
+			for _, e := range b.ContextElements.Elements {
+				if txt, ok := e.(*slack.TextBlockObject); ok {
+					if n := utf8.RuneCountInString(txt.Text); n > 2000 {
+						t.Errorf("context text is %d chars, Slack's limit is 2000", n)
+					}
+				}
+			}
+		}
+	}
+	text := DecisionText(v)
+	if n := utf8.RuneCountInString(text); n > 1500 || !utf8.ValidString(text) || !strings.Contains(text, "…") {
+		t.Errorf("fallback text is %d runes, valid UTF-8 %v: %.80q", n, utf8.ValidString(text), text)
+	}
+	if got := render(t, v); !strings.Contains(got, strings.Repeat("é", 499)+"…") {
+		t.Error("rationale not cut to 500 runes with an ellipsis")
 	}
 }
