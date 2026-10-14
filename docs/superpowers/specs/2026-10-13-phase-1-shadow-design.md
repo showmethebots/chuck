@@ -89,9 +89,10 @@ Package layout follows the Notion design's suggested repo layout.
 **`github.go`** — `POST /webhooks/github`.
 
 1. Read the body through `http.MaxBytesReader` at 25 MB, GitHub's own cap.
-   At most 2 bodies are read at once (further requests wait for a slot); a
-   request that gets a slot has 10 s to finish sending (GitHub itself gives
-   up after 10 s), and the server's 30 s `ReadTimeout` bounds the rest. With
+   At most 2 bodies are read at once. A request waits up to 10 s for a slot
+   (then 503) and, once it holds one, has 10 s to finish sending (then 408);
+   GitHub itself gives up after 10 s. For this route that deadline replaces
+   the server's 30 s `ReadTimeout`, which bounds every other route. With
    a `Content-Length` the body goes into one exactly-sized buffer. A
    declared length over 25 MB is a 413 before reading; a body that times
    out is a 408, any other read failure a 400. This narrows, but does not
