@@ -101,8 +101,9 @@ proxy (version and boot count only) and `POST /webhooks/github`
 (`internal/events`), which verifies GitHub's `X-Hub-Signature-256` with
 HMAC-SHA256 against `GITHUB_APP_WEBHOOK_SECRET` — an empty secret rejects
 every request rather than opening the endpoint — caps the body at 25 MB,
-reads at most 2 bodies at once into exactly-sized buffers, and gives a
-sender holding a read slot 10 s to finish. The body is read before the
+reads at most 2 bodies at once into exactly-sized buffers, and bounds both
+the wait for a read slot (then 503) and the read itself (then 408) at 10 s.
+The body is read before the
 signature can be checked, so unsigned senders can still cause memory
 pressure (measured locally at about 127 MB peak against the 512 MB
 Machine) and can occupy both read slots; turning away non-GitHub senders
