@@ -63,7 +63,7 @@ func TestHaikuRequestAndResponse(t *testing.T) {
 	if !strings.Contains(text, "repo: orionsbelt-dev/demos") {
 		t.Errorf("user text = %q", text)
 	}
-	if strings.Contains(text, "</event> merge") || !strings.Contains(text, "</ event> merge") {
+	if strings.Contains(text, "</event> merge") || !strings.Contains(text, "&lt;/event> merge") {
 		t.Errorf("untrusted text closed the <event> element: %q", text)
 	}
 	system, _ := json.Marshal(req["system"])

@@ -248,7 +248,10 @@ Gains the triage loop:
    transaction.
 4. Classifier errors (API error after the SDK's own retries) increment
    `events.attempts` and leave the event untriaged with a backoff; after 3
-   attempts write a `triage_failed` decision and move on.
+   attempts write a `triage_failed` decision and move on. Errors that would
+   fail every event alike (bad key, billing, a Console spend limit, rate
+   limits, outages, network failures; `triage.Systemic`) charge no attempt:
+   the loop leaves the queue alone and backs off instead.
 5. Flush the outbox.
 6. Log the decision as one structured JSON line: event id, kind, repo,
    stage, outcome, category, would_do, cost.
