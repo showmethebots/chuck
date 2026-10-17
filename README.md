@@ -7,8 +7,8 @@ Autonomous project manager agent → Design & Plan); that page is the source
 of truth.
 
 **Status: Phase 1 (shadow mode), in progress.** The daemon receives GitHub
-App webhooks at `POST /webhooks/github` and stores them. It takes no
-actions. Manual setup steps are in
+App webhooks, triages each event with Haiku, and records what it would have
+done. It takes no actions. Manual setup steps are in
 [docs/phase-1-human-steps.md](docs/phase-1-human-steps.md).
 
 ## Layout
@@ -19,6 +19,7 @@ internal/config/    routes.yaml + policy.yaml loader and schema validation
 internal/memory/    SQLite state (WAL, embedded migrations)
 internal/events/    GitHub webhook receiver
 internal/daemon/    heartbeat loop and HTTP endpoints
+internal/triage/    noise rules, Haiku classifier, output validation
 config/             routes.yaml (routing rules), policy.yaml (permissions, budgets, caps)
 deploy/             fly.toml, Litestream config, entrypoint, worker image, restore check
 ```

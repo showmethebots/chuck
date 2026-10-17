@@ -10,6 +10,7 @@
 //	CHUCK_HEARTBEAT            heartbeat interval as a Go duration (default 1m)
 //	PORT                       HTTP listen port (default 8080)
 //	GITHUB_APP_WEBHOOK_SECRET  turns on POST /webhooks/github; deliveries must be signed with it
+//	ANTHROPIC_API_KEY          turns on Haiku triage
 package main
 
 import (
@@ -23,10 +24,13 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/anthropics/anthropic-sdk-go/option"
+
 	"github.com/orionsbelt-dev/chuck/internal/config"
 	"github.com/orionsbelt-dev/chuck/internal/daemon"
 	"github.com/orionsbelt-dev/chuck/internal/events"
 	"github.com/orionsbelt-dev/chuck/internal/memory"
+	"github.com/orionsbelt-dev/chuck/internal/triage"
 )
 
 // version is set at build time with -ldflags "-X main.version=...".
@@ -110,6 +114,15 @@ func runDaemon(ctx context.Context, log *slog.Logger, getenv func(string) string
 	if in.WebhookSecret != "" {
 		d.Webhook = &events.GitHub{Secret: []byte(in.WebhookSecret), Store: store, Log: log}
 	}
+	if in.AnthropicKey != "" {
+		tr := &daemon.Triage{
+			Store:      store,
+			Classifier: triage.NewHaiku(cfg.Policy, option.WithAPIKey(in.AnthropicKey)),
+			Policy:     cfg.Policy,
+			Log:        log,
+		}
+		d.Background = append(d.Background, tr.Run)
+	}
 	return d.Run(ctx, ln)
 }
 
@@ -124,10 +137,14 @@ func envOr(getenv func(string) string, key, def string) string {
 // independently so Phase 1 can deploy in slices.
 type integrations struct {
 	WebhookSecret string
+	AnthropicKey  string
 }
 
 func loadIntegrations(getenv func(string) string) (integrations, error) {
-	return integrations{WebhookSecret: getenv("GITHUB_APP_WEBHOOK_SECRET")}, nil
+	return integrations{
+		WebhookSecret: getenv("GITHUB_APP_WEBHOOK_SECRET"),
+		AnthropicKey:  getenv("ANTHROPIC_API_KEY"),
+	}, nil
 }
 
 // names lists the integrations that are on, for logs and /healthz.
@@ -135,6 +152,9 @@ func (in integrations) names() []string {
 	n := []string{}
 	if in.WebhookSecret != "" {
 		n = append(n, "github_webhook")
+	}
+	if in.AnthropicKey != "" {
+		n = append(n, "triage")
 	}
 	return n
 }
