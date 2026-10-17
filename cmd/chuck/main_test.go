@@ -73,11 +73,14 @@ func TestLoadIntegrations(t *testing.T) {
 	if err != nil || len(in.names()) != 0 {
 		t.Fatalf("no env: %v, names %v; want none", err, in.names())
 	}
-	in, err = loadIntegrations(env(map[string]string{"GITHUB_APP_WEBHOOK_SECRET": "s"}))
-	if err != nil || in.WebhookSecret != "s" {
-		t.Fatalf("secret: %+v, %v", in, err)
+	in, err = loadIntegrations(env(map[string]string{
+		"GITHUB_APP_WEBHOOK_SECRET": "s",
+		"ANTHROPIC_API_KEY":         "k",
+	}))
+	if err != nil || in.WebhookSecret != "s" || in.AnthropicKey != "k" {
+		t.Fatalf("got %+v, %v", in, err)
 	}
-	if got := in.names(); len(got) != 1 || got[0] != "github_webhook" {
-		t.Fatalf("names = %v", got)
+	if got := strings.Join(in.names(), ","); got != "github_webhook,triage" {
+		t.Fatalf("names = %s", got)
 	}
 }
