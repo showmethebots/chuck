@@ -128,7 +128,10 @@ the model's output is validated against `policy.yaml`'s declared actions,
 a proposed `target` must be a `https://github.com/` URL, `</event>` is
 escaped in the prompt so untrusted text can't close the tag early, and the
 agent marker (`<!-- agent: <skill> -->`) is honoured only when the text's
-own author (`user.login`) is `cwinters8`. Phase 1 executes nothing: triage
+own author (`user.login`) is `cwinters8`. Decision posts escape `&`, `<`
+and `>` in the model's `target` and rationale and in the event URL
+(`internal/notify`), so the output can't post `<!channel>` or a link whose
+label hides its URL. Phase 1 executes nothing: triage
 only records a decision and, for `ask_first` proposals, an approval — no
 code path acts on either.
 
