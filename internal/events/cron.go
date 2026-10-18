@@ -30,15 +30,26 @@ func (d Daily) Next(t time.Time) time.Time {
 
 // RunDaily calls f at each occurrence of d until ctx ends. A run missed
 // while the daemon was down is skipped, not caught up.
+//
+// The timer counts monotonic time but next is a wall-clock time, so the
+// timer can fire while the wall clock still reads just before next (NTP
+// slewing it, say). Each run therefore schedules from the later of now and
+// the occurrence that last fired, never firing one occurrence twice.
 func RunDaily(ctx context.Context, d Daily, now func() time.Time, f func(ctx context.Context, at time.Time)) {
+	var last time.Time
 	for {
-		next := d.Next(now())
+		from := now()
+		if from.Before(last) {
+			from = last
+		}
+		next := d.Next(from)
 		timer := time.NewTimer(next.Sub(now()))
 		select {
 		case <-ctx.Done():
 			timer.Stop()
 			return
 		case <-timer.C:
+			last = next
 			f(ctx, next)
 		}
 	}

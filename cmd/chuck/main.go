@@ -146,8 +146,15 @@ func runDaemon(ctx context.Context, log *slog.Logger, getenv func(string) string
 		}
 		if sc != nil {
 			tr.OnBudgetHit = func(ctx context.Context, spent, budget float64) {
-				if _, err := sc.Post(ctx, in.Slack.MainChannel, notify.BudgetText(spent, budget), nil); err != nil {
+				text := notify.BudgetText(spent, budget)
+				ts, err := sc.Post(ctx, in.Slack.MainChannel, text, nil)
+				if err != nil {
 					log.Error("post budget notice", "err", err.Error())
+					return
+				}
+				if err := store.RecordMessage(ctx, memory.Message{Channel: in.Slack.MainChannel, TS: ts,
+					Direction: "out", Kind: "post", Text: text, Allowed: true, CreatedAt: time.Now()}); err != nil {
+					log.Error("record budget notice", "err", err.Error())
 				}
 			}
 		}

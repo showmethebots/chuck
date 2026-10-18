@@ -57,3 +57,25 @@ func TestRunDailyFiresAtTheScheduledTime(t *testing.T) {
 		t.Fatal("did not fire")
 	}
 }
+
+// The timer can fire while the wall clock still reads before the occurrence;
+// a now that never advances is the extreme case. The occurrence must still
+// run only once.
+func TestRunDailyFiresEachOccurrenceOnce(t *testing.T) {
+	d, _ := ParseDaily("13:00")
+	now := func() time.Time { return time.Date(2026, 10, 13, 12, 59, 59, 990_000_000, time.UTC) }
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	fired := make(chan time.Time, 10)
+	go RunDaily(ctx, d, now, func(_ context.Context, at time.Time) {
+		select {
+		case fired <- at:
+		default:
+		}
+	})
+	time.Sleep(200 * time.Millisecond)
+	cancel()
+	if n := len(fired); n != 1 {
+		t.Fatalf("fired %d times, want 1", n)
+	}
+}

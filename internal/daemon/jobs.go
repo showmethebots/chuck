@@ -17,6 +17,7 @@ type JobStore interface {
 	QueueGradePosts(ctx context.Context, ids []int64) error
 	Summary(ctx context.Context, since, until time.Time) (memory.Summary, error)
 	Control(ctx context.Context) (memory.Control, error)
+	RecordMessage(ctx context.Context, m memory.Message) error
 }
 
 // DailyJobs runs once a day, paused or not, so a pause never silently stops
@@ -43,6 +44,9 @@ func (j *DailyJobs) Run(ctx context.Context, at time.Time) error {
 	if err != nil {
 		return err
 	}
+	// The sample is queued before the summary posts, so if the post fails
+	// the sample stands and that day's summary is lost; only the error is
+	// logged. That is accepted for Phase 1.
 	if err := j.Store.QueueGradePosts(ctx, ids); err != nil {
 		return err
 	}
@@ -65,8 +69,12 @@ func (j *DailyJobs) Run(ctx context.Context, at time.Time) error {
 	if j.Poster == nil {
 		return nil
 	}
-	_, err = j.Poster.Post(ctx, j.MainChannel, text, nil)
-	return err
+	ts, err := j.Poster.Post(ctx, j.MainChannel, text, nil)
+	if err != nil {
+		return err
+	}
+	return j.Store.RecordMessage(ctx, memory.Message{Channel: j.MainChannel, TS: ts, Direction: "out",
+		Kind: "post", Text: text, Allowed: true, CreatedAt: time.Now()})
 }
 
 // DiskUsage reports used and total bytes on the filesystem holding path.

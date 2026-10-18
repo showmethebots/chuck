@@ -51,6 +51,10 @@ func TestDailyJobsQueueSampleAndPostSummary(t *testing.T) {
 	if len(p.posts) != 1 || !strings.HasPrefix(p.posts[0], "CMAIN|") || !strings.Contains(p.posts[0], "chuck daily summary") {
 		t.Fatalf("posts = %v", p.posts)
 	}
+	if msgs, _ := s.Messages(ctx); len(msgs) != 1 || msgs[0].Direction != "out" || msgs[0].TS != "1.1" ||
+		!strings.Contains(msgs[0].Text, "chuck daily summary") {
+		t.Fatalf("summary not recorded: %+v", msgs)
+	}
 	if n, _ := s.QueueDepth(ctx); n != 0 {
 		t.Fatalf("cron tick entered the triage queue")
 	}
