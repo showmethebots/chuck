@@ -32,9 +32,9 @@ type ReplayReport struct {
 //
 // maxUSD caps how much a real Haiku run may spend: once accumulated
 // CostUSD reaches maxUSD, Replay stops before the next item and sets
-// Stopped. maxUSD <= 0 means no cap (used by tests and --fake, which costs
-// nothing). AGENTS.md requires every model tier to have a daily budget;
-// this is replay's.
+// Stopped. maxUSD <= 0 means no cap, for tests and --fake, which cost
+// nothing; chuck replay rejects it for a real Haiku run. AGENTS.md requires
+// every model tier to have a daily budget; this is replay's.
 func Replay(ctx context.Context, items []memory.Graded, c Classifier, p config.Policy, maxUSD float64) ReplayReport {
 	r := ReplayReport{Rows: map[string]*ReplayRow{}, Total: len(items), MaxUSD: maxUSD}
 	for _, it := range items {
@@ -127,7 +127,9 @@ func (r ReplayReport) String() string {
 }
 
 // EchoClassifier returns each event's stored model output instead of
-// calling a model, so CI can exercise replay without an API key.
+// calling a model, so CI can exercise replay without an API key. It is keyed
+// by Input, so when two graded events build the same input, the last one's
+// output is replayed for both. That is harmless for CI.
 type EchoClassifier map[Input]string
 
 func NewEchoClassifier(items []memory.Graded) EchoClassifier {

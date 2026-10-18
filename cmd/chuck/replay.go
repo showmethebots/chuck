@@ -22,12 +22,18 @@ func runReplay(ctx context.Context, args []string, getenv func(string) string, c
 	db := fs.String("db", "", "SQLite file to replay, opened read-only (required)")
 	since := fs.String("since", "", "only decisions on or after this UTC date, YYYY-MM-DD")
 	fake := fs.Bool("fake", false, "reuse stored model output instead of calling Haiku")
-	maxUSD := fs.Float64("max-usd", 1.00, "stop once Haiku spend reaches this many dollars; 0 means no cap")
+	maxUSD := fs.Float64("max-usd", 1.00, "stop once Haiku spend reaches this many dollars; must be above 0 unless --fake")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 	if *db == "" {
 		_, _ = fmt.Fprintln(stderr, "replay: --db is required")
+		return 2
+	}
+	// Replay's Haiku spend always has a cap: AGENTS.md allows no
+	// "unlimited" budget. --fake costs nothing, so it needs none.
+	if !*fake && *maxUSD <= 0 {
+		_, _ = fmt.Fprintln(stderr, "replay: --max-usd must be above 0")
 		return 2
 	}
 	cfg, err := config.Load(configDir)

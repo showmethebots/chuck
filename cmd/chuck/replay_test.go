@@ -71,6 +71,14 @@ func TestReplayUsage(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = s.Close()
+	for _, limit := range []string{"0", "-1"} {
+		errOut.Reset()
+		code := run(context.Background(), []string{"replay", "--db", db, "--max-usd", limit},
+			env(map[string]string{"CHUCK_CONFIG_DIR": "../../config", "ANTHROPIC_API_KEY": "sk-test"}), &out, &errOut)
+		if code != 2 || !strings.Contains(errOut.String(), "--max-usd") {
+			t.Fatalf("--max-usd %s: exit %d, stderr %q", limit, code, errOut.String())
+		}
+	}
 	errOut.Reset()
 	if code := run(context.Background(), []string{"replay", "--db", db}, env(map[string]string{"CHUCK_CONFIG_DIR": "../../config"}), &out, &errOut); code != 1 || !strings.Contains(errOut.String(), "ANTHROPIC_API_KEY") {
 		t.Fatalf("no key: exit %d, stderr %q", code, errOut.String())
