@@ -3,6 +3,7 @@ package notify
 import (
 	"fmt"
 	"strconv"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/slack-go/slack"
@@ -28,24 +29,41 @@ const (
 	maxRef       = 300 // a target or a URL
 )
 
-// clip keeps the first n runes of s, marking a cut with "…".
-func clip(s string, n int) string {
-	if utf8.RuneCountInString(s) <= n {
-		return s
+// field escapes s for Slack mrkdwn and keeps at most n runes of the result,
+// marking a cut with "…". Escaping &, < and > means model or payload text
+// can't form a mention like <!channel> or a link whose label hides its URL.
+// The cut never splits an entity, so the bound holds after escaping.
+func field(s string, n int) string {
+	var b strings.Builder
+	runes := 0
+	for _, r := range s {
+		e := string(r)
+		switch r {
+		case '&':
+			e = "&amp;"
+		case '<':
+			e = "&lt;"
+		case '>':
+			e = "&gt;"
+		}
+		if runes += utf8.RuneCountInString(e); runes > n {
+			return b.String() + "…"
+		}
+		b.WriteString(e)
 	}
-	return string([]rune(s)[:n]) + "…"
+	return b.String()
 }
 
 func headline(v memory.DecisionView) string {
 	switch {
 	case v.Outcome == memory.OutcomeDropped:
-		return fmt.Sprintf("Dropped by rule `%s`", clip(v.Rationale, maxRationale))
+		return fmt.Sprintf("Dropped by rule `%s`", field(v.Rationale, maxRationale))
 	case v.Outcome == memory.OutcomeFailed:
 		return "Triage failed"
 	case v.WouldDo == "" || v.WouldDo == "none":
 		return "chuck would do nothing"
 	default:
-		return fmt.Sprintf("chuck would `%s` %s (%s)", v.WouldDo, clip(v.Target, maxRef), v.Permission)
+		return fmt.Sprintf("chuck would `%s` %s (%s)", v.WouldDo, field(v.Target, maxRef), v.Permission)
 	}
 }
 
@@ -53,7 +71,7 @@ func headline(v memory.DecisionView) string {
 func DecisionText(v memory.DecisionView) string {
 	text := fmt.Sprintf("%s %s: %s", v.Repo, v.Kind, headline(v))
 	if v.URL != "" {
-		text += " " + clip(v.URL, maxRef)
+		text += " " + field(v.URL, maxRef)
 	}
 	if v.PostKind == memory.PostApproval {
 		text = shadowBanner + " " + text
@@ -82,14 +100,14 @@ func DecisionBlocks(v memory.DecisionView) []slack.Block {
 	}
 	about := fmt.Sprintf("%s · %s · %s · confidence %.2f", v.Repo, v.Kind, what, v.Confidence)
 	if v.URL != "" {
-		about += fmt.Sprintf(" · <%s>", clip(v.URL, maxRef))
+		about += fmt.Sprintf(" · <%s>", field(v.URL, maxRef))
 	}
 	blocks := []slack.Block{
 		slack.NewSectionBlock(md(head), nil, nil),
 		slack.NewContextBlock("", md(about)),
 	}
 	if v.Outcome == memory.OutcomeOK && v.Rationale != "" {
-		blocks = append(blocks, slack.NewSectionBlock(md("> "+clip(v.Rationale, maxRationale)), nil, nil))
+		blocks = append(blocks, slack.NewSectionBlock(md("> "+field(v.Rationale, maxRationale)), nil, nil))
 	}
 
 	var status []string

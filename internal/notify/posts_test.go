@@ -142,3 +142,35 @@ func TestPostBoundsLongFields(t *testing.T) {
 		t.Error("rationale not cut to 500 runes with an ellipsis")
 	}
 }
+
+// Model output and payload text are untrusted: a prompt injection mustn't be
+// able to ping the channel or hide a link's real URL behind a GitHub label.
+func TestPostEscapesUntrustedText(t *testing.T) {
+	const evil = "https://evil.example|github.com/orionsbelt-dev/chuck/pull/1"
+	v := view(memory.Decision{WouldDo: "comment_issue", Permission: "act_freely",
+		Target: "https://github.com/o/r/issues/7 <" + evil + ">", Category: "new_issue",
+		Rationale: "urgent <!channel> <!here> & <" + evil + ">", PostKind: memory.PostApproval})
+	v.URL = "https://github.com/o/r/issues/7><!channel"
+	for name, got := range map[string]string{"blocks": render(t, v), "text": DecisionText(v)} {
+		for _, bad := range []string{"<!channel>", "<!here>", "<" + evil + ">", "><!channel"} {
+			if strings.Contains(got, bad) {
+				t.Errorf("%s contains %q unescaped:\n%s", name, bad, got)
+			}
+		}
+	}
+	if got := render(t, v); !strings.Contains(got, "&lt;!channel&gt;") || !strings.Contains(got, " &amp; ") {
+		t.Errorf("rationale not escaped:\n%s", got)
+	}
+}
+
+func TestFieldNeverSplitsAnEntity(t *testing.T) {
+	if got := field(strings.Repeat("&", 10), 12); got != "&amp;&amp;…" {
+		t.Errorf("field = %q, want two whole entities and a cut mark", got)
+	}
+	if n := utf8.RuneCountInString(field(strings.Repeat("&", 5000), maxRationale)); n > maxRationale+1 {
+		t.Errorf("escaped field is %d runes, want at most %d", n, maxRationale+1)
+	}
+	if got := field("a<b", 10); got != "a&lt;b" {
+		t.Errorf("field = %q, want a&lt;b", got)
+	}
+}

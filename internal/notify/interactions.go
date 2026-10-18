@@ -62,57 +62,58 @@ func (h *Interactions) now() time.Time {
 	return time.Now()
 }
 
-// Command handles "/chuck <text>" and returns the ephemeral reply, or ""
-// when the user gets none.
-func (h *Interactions) Command(ctx context.Context, user, channel, text string) string {
+// Command handles "/chuck <text>". It returns the ephemeral reply, or ""
+// when the user gets none, and the text to announce in the main channel, or
+// "" when there is nothing to announce. The caller acks with the reply
+// before passing the announcement to Announce, so a slow Slack can't hold
+// the ack past Slack's 3-second window.
+func (h *Interactions) Command(ctx context.Context, user, channel, text string) (reply, announcement string) {
 	sub := strings.ToLower(strings.TrimSpace(text))
 	msg := memory.Message{Channel: channel, User: user, Direction: "in", Kind: "command",
 		Text: strings.TrimSpace("/chuck " + text), CreatedAt: h.now()}
 	role := h.Allow.RoleOf(user)
 	if role == config.RoleNone {
 		h.record(ctx, msg)
-		return ""
+		return "", ""
 	}
 	need, known := commandRoles[sub]
 	if !known {
 		msg.Allowed = true
 		h.record(ctx, msg)
-		return usage
+		return usage, ""
 	}
 	if role < need {
 		h.record(ctx, msg)
-		return fmt.Sprintf("`/chuck %s` needs the owner.", sub)
+		return fmt.Sprintf("`/chuck %s` needs the owner.", sub), ""
 	}
 	msg.Allowed = true
-	reply, changed, err := h.run(ctx, sub, user)
+	reply, announcement, changed, err := h.run(ctx, sub, user)
 	if err != nil {
 		h.Log.Error("slack command", "command", sub, "err", err.Error())
 		reply = "Something went wrong: " + err.Error()
 	}
 	msg.ChangedState = changed
 	h.record(ctx, msg)
-	return reply
+	return reply, announcement
 }
 
-func (h *Interactions) run(ctx context.Context, sub, user string) (string, bool, error) {
+func (h *Interactions) run(ctx context.Context, sub, user string) (reply, announcement string, changed bool, err error) {
 	switch sub {
 	case "status":
 		s, err := h.status(ctx)
-		return s, false, err
+		return s, "", false, err
 	case "pause", "kill":
 		if err := h.Store.SetControl(ctx, memory.Control{Paused: true, Reason: sub, By: user, ChangedAt: h.now()}); err != nil {
-			return "", false, err
+			return "", "", false, err
 		}
-		h.announce(ctx, fmt.Sprintf("<@%s> ran `/chuck %s`: triage is paused (Phase 1 has no workers to stop). Only the owner can resume.", user, sub))
-		return "Paused.", true, nil
+		return "Paused.", fmt.Sprintf("<@%s> ran `/chuck %s`: triage is paused (Phase 1 has no workers to stop). Only the owner can resume.", user, sub), true, nil
 	case "resume":
 		if err := h.Store.SetControl(ctx, memory.Control{Paused: false, By: user, ChangedAt: h.now()}); err != nil {
-			return "", false, err
+			return "", "", false, err
 		}
-		h.announce(ctx, fmt.Sprintf("<@%s> resumed chuck.", user))
-		return "Resumed.", true, nil
+		return "Resumed.", fmt.Sprintf("<@%s> resumed chuck.", user), true, nil
 	}
-	return usage, false, nil
+	return usage, "", false, nil
 }
 
 func (h *Interactions) status(ctx context.Context) (string, error) {
@@ -160,12 +161,13 @@ func (h *Interactions) Action(ctx context.Context, user, channel, ts, actionID, 
 		h.ephemeral(ctx, channel, user, "Only the owner can grade decisions.")
 		return
 	}
+	msg.Allowed = true
 	id, err := strconv.ParseInt(value, 10, 64)
 	if err != nil {
+		// The user holds the role; a malformed value just changes nothing.
 		h.record(ctx, msg)
 		return
 	}
-	msg.Allowed = true
 	changed, note, err := h.act(ctx, actionID, id, user)
 	if err != nil {
 		h.Log.Error("slack button", "action", actionID, "decision_id", id, "err", err.Error())
@@ -216,7 +218,8 @@ func (h *Interactions) refresh(ctx context.Context, channel, ts string, id int64
 	}
 }
 
-func (h *Interactions) announce(ctx context.Context, text string) {
+// Announce posts text to the main channel and records it.
+func (h *Interactions) Announce(ctx context.Context, text string) {
 	ts, err := h.Poster.Post(ctx, h.MainChannel, text, nil)
 	if err != nil {
 		h.Log.Error("slack announce", "err", err.Error())

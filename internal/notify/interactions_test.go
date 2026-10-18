@@ -84,7 +84,10 @@ func TestCommandMatrix(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			reply := h.Command(ctx, c.user, "CMAIN", c.text)
+			reply, announcement := h.Command(ctx, c.user, "CMAIN", c.text)
+			if announcement != "" {
+				h.Announce(ctx, announcement)
+			}
 			if c.reply == "" && reply != "" {
 				t.Errorf("reply = %q, want none", reply)
 			}
@@ -172,6 +175,24 @@ func TestButtonMatrix(t *testing.T) {
 			}
 			noUnauthorizedChange(t, s)
 		})
+	}
+}
+
+// A malformed button value from an allowlisted user changes nothing, but
+// it isn't an allowlist rejection, so the daily summary mustn't count it as one.
+func TestButtonMalformedValueIsAllowed(t *testing.T) {
+	ctx := context.Background()
+	h, s, p := newInteractions(t)
+	h.Action(ctx, owner, "CMAIN", "1700000000.000001", ActionGradeUp, "not-a-number")
+	msgs, err := s.Messages(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msgs) != 1 || !msgs[0].Allowed || msgs[0].ChangedState {
+		t.Errorf("messages = %+v, want one allowed click that changed nothing", msgs)
+	}
+	if len(p.updates) > 0 || len(p.ephemerals) > 0 {
+		t.Errorf("updates = %+v, ephemerals = %+v, want none", p.updates, p.ephemerals)
 	}
 }
 

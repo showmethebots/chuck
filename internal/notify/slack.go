@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"time"
 
 	"github.com/slack-go/slack"
@@ -18,8 +19,13 @@ type Slack struct {
 	log *slog.Logger
 }
 
+// apiTimeout bounds every Web API call. slack-go's default client has none,
+// so a hung request would stall the Socket Mode consumer or the triage loop.
+const apiTimeout = 10 * time.Second
+
 func NewSlack(botToken, appToken string, log *slog.Logger) *Slack {
-	return &Slack{api: slack.New(botToken, slack.OptionAppLevelToken(appToken)), log: log}
+	return &Slack{api: slack.New(botToken, slack.OptionAppLevelToken(appToken),
+		slack.OptionHTTPClient(&http.Client{Timeout: apiTimeout})), log: log}
 }
 
 func msgOptions(text string, blocks []slack.Block) []slack.MsgOption {
@@ -79,14 +85,23 @@ func (s *Slack) consume(ctx context.Context, sm *socketmode.Client, h *Interacti
 	}
 }
 
-func (s *Slack) dispatch(ctx context.Context, sm *socketmode.Client, evt socketmode.Event, h *Interactions) {
+// acker is the part of socketmode.Client dispatch uses.
+type acker interface {
+	AckCtx(ctx context.Context, envelopeID string, payload any) error
+}
+
+func (s *Slack) dispatch(ctx context.Context, sm acker, evt socketmode.Event, h *Interactions) {
 	switch evt.Type {
 	case socketmode.EventTypeSlashCommand:
 		cmd, ok := evt.Data.(slack.SlashCommand)
 		if !ok || evt.Request == nil {
 			return
 		}
-		reply := h.Command(ctx, cmd.UserID, cmd.ChannelID, cmd.Text)
+		reply, announcement := h.Command(ctx, cmd.UserID, cmd.ChannelID, cmd.Text)
+		// Ack before announcing: Slack shows the user operation_timeout if
+		// the ack takes over 3 seconds, and the announcement is a Web API
+		// call that can take up to apiTimeout.
+		//
 		// Ack with ctx, not Ack's own context.TODO(): Ack blocks on the
 		// client's response channel, and Run cancels connCtx (which ctx
 		// derives from) as soon as RunContext returns, after the response
@@ -98,6 +113,9 @@ func (s *Slack) dispatch(ctx context.Context, sm *socketmode.Client, evt socketm
 		}
 		if err := sm.AckCtx(ctx, evt.Request.EnvelopeID, payload); err != nil {
 			s.log.Error("ack slash command", "err", err.Error())
+		}
+		if announcement != "" {
+			h.Announce(ctx, announcement)
 		}
 	case socketmode.EventTypeInteractive:
 		cb, ok := evt.Data.(slack.InteractionCallback)
