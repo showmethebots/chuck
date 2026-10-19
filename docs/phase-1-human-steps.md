@@ -32,18 +32,32 @@ curl -s https://chuck.fly.dev/healthz
 ### 1.2 Create the `orionsbelt-dev` App
 
 1. Open https://github.com/organizations/orionsbelt-dev/settings/apps/new
-2. **GitHub App name:** `orionsbelt-chuck`
+2. **GitHub App name:** `chuck-orion`
 3. **Homepage URL:** `https://github.com/orionsbelt-dev/chuck`
 4. **Webhook:** Active. **Webhook URL:** `https://chuck.fly.dev/webhooks/github`.
    **Webhook secret:** the value from 1.1.
-5. **Repository permissions**, all **Read-only**: Actions, Contents, Issues,
-   Metadata, Pull requests. Leave everything else at No access.
-6. **Subscribe to events:** Issue comment, Issues, Pull request, Pull request
-   review, Pull request review comment, Push, Workflow run. Do not tick Check
-   run, Check suite or Status.
+5. **Repository permissions**, each **Read-only**. Leave everything else at
+   No access.
+   - [ ] Actions
+   - [ ] Contents
+   - [ ] Issues
+   - [ ] Metadata
+   - [ ] Pull requests
+6. **Subscribe to events.** Do not tick Check run, Check suite or Status.
+   - [ ] Issue comment
+   - [ ] Issues
+   - [ ] Pull request
+   - [ ] Pull request review
+   - [ ] Pull request review comment
+   - [ ] Push
+   - [ ] Workflow run
 7. **Where can this GitHub App be installed?** Only on this account.
-8. Create. You do not need to generate a private key; chuck makes no GitHub
-   API calls in Phase 1.
+8. Create. GitHub won't install an App until it has a private key, so click
+   **generate a private key** in the banner (or **General** → **Private
+   keys** → **Generate a private key**). It downloads a `.pem` file. Delete
+   it: chuck makes no GitHub API calls in Phase 1, and anyone holding the key
+   can read every repository the App is installed on. Don't give it to Fly or
+   save it anywhere. When a later phase needs the API, generate a new one.
 9. **Install App** → `orionsbelt-dev` → **All repositories**.
 
 ### 1.3 Create the `cwinters8` App
@@ -51,9 +65,9 @@ curl -s https://chuck.fly.dev/healthz
 Same as 1.2, except:
 
 1. Open https://github.com/settings/apps/new
-2. **GitHub App name:** `cwinters8-chuck`
+2. **GitHub App name:** `chuck-winters`
 3. **Install App** → `cwinters8` → **Only select repositories**:
-   `agent-ci-kit`, `agent-skills`, `content-workshop`.
+   `agent-ci-kit`, `agent-skills`.
 
 ### 1.4 Check deliveries arrive
 
@@ -68,16 +82,19 @@ Same as 1.2, except:
 
 Only needed to run chuck on your laptop against real GitHub traffic.
 
-1. `brew install cloudflared`
-2. Same as 1.2 with: name `orionsbelt-chuck-dev`, a **new** secret from
-   `openssl rand -hex 32` (put it in your local `.env` as
-   `GITHUB_APP_WEBHOOK_SECRET`), and **Install** on `orionsbelt-dev` →
-   **Only select repositories** → `demos`.
-3. Each local session: `cloudflared tunnel --url http://localhost:8080`,
-   then paste the printed `https://….trycloudflare.com/webhooks/github` URL
-   into the dev App's Webhook URL. The URL changes every time the tunnel
-   restarts.
-4. Run chuck with your `.env` loaded: `set -a; . ./.env; set +a; make run`
+1. `brew install ngrok`, sign up at https://ngrok.com, and run
+   `ngrok config add-authtoken <token>` with the token from the dashboard.
+2. In the ngrok dashboard → **Domains**, claim the free static domain
+   (`….ngrok-free.app`). It stays the same across sessions.
+3. Start the tunnel: `ngrok http --url=<your-domain> 8080`.
+4. Same as 1.2 with: name `chuck-orion-dev`; **Webhook URL**
+   `https://<your-domain>/webhooks/github`, not the production URL; a
+   **new** secret from `openssl rand -hex 32` (put it in your local `.env`,
+   copied from `.env.example`, as `GITHUB_APP_WEBHOOK_SECRET`); and
+   **Install** on `orionsbelt-dev` → **Only select repositories** → `demos`.
+5. Run chuck from the repo root with `make run`. Later sessions follow
+   "Running locally" in the [README](../README.md#running-locally); the
+   Webhook URL does not change.
 
 ## 2. Anthropic API key (after the slice B PR merges and deploys)
 
@@ -198,7 +215,7 @@ copy its member ID as in 3.3. Do not add it to `config/slack.yaml` yet.
 Repeat 3.2 with `name: chuck-dev`, `display_name: chuck-dev` and
 `command: /chuck-dev`, invite it to `#chuck-dev`, and put its tokens and
 `#chuck-dev`'s ID (as both channel variables) in your local `.env`. Run
-locally with `set -a; . ./.env; set +a; make run`.
+locally as in "Running locally" in the [README](../README.md#running-locally).
 
 ## 4. Live checklist (after section 3)
 

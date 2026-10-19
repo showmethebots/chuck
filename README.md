@@ -1,3 +1,6 @@
+<!-- markdownlint-disable-next-line -->
+<p align="center"><img src="docs/chuck.png" alt="chuck, a woodchuck project manager holding a checklist" width="200"></p>
+
 # chuck
 
 An always-on project manager agent on Fly.io. It picks up events, routes
@@ -15,7 +18,7 @@ is [docs/shadow-checklist.md](docs/shadow-checklist.md).
 
 ## Layout
 
-```
+```text
 cmd/chuck/          entrypoint: `run` (daemon), `validate` (config check), `replay` (triage agreement)
 internal/config/    routes.yaml, policy.yaml, slack.yaml loader and schema validation
 internal/memory/    SQLite state (WAL, embedded migrations): events, decisions, grades, approvals
@@ -51,5 +54,22 @@ make lint       # golangci-lint
 make run        # daemon locally, state in ./data, no Litestream
 make smoke      # build image, run the Litestream restore check
 ```
+
+### Running locally
+
+One-time setup (the dev GitHub App, the ngrok domain, the dev Slack app) is
+in [docs/phase-1-human-steps.md](docs/phase-1-human-steps.md) sections 1.5
+and 3.7. Each session after that:
+
+1. `cp .env.example .env` the first time, then fill in what you need. Each
+   integration turns on independently, so an empty file runs the bare
+   daemon. Variables set in your shell override `.env`, and so does the
+   `CHUCK_HEARTBEAT=5s` that `make run` sets.
+2. For real GitHub traffic, start the tunnel:
+   `ngrok http --url=<your-domain> 8080`.
+3. `make run` from the repo root.
+
+Webhook deliveries made while the tunnel is down fail and are not retried;
+redeliver them from the dev App's **Advanced** → **Recent Deliveries**.
 
 Deploying: see [deploy/README.md](deploy/README.md).

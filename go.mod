@@ -4,6 +4,7 @@ go 1.27.2
 
 require (
 	github.com/anthropics/anthropic-sdk-go v1.80.0
+	github.com/joho/godotenv v1.5.1
 	github.com/slack-go/slack v0.30.1
 	go.yaml.in/yaml/v3 v3.0.5
 	modernc.org/sqlite v1.60.1

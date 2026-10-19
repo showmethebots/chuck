@@ -31,7 +31,7 @@ make smoke
 | `deploy/entrypoint.sh` / `deploy/litestream.yml` (replica URL, Tigris secrets) | `deploy/README.md` step 3 (**followed against the Fly account**) |
 | `deploy/smoke-restore.sh` | `deploy/README.md` "Phase 0 exit check" |
 | `internal/config/config.go` (validation rules) | `README.md` "Config", header comments in `config/routes.yaml` and `config/policy.yaml`, `AGENTS.md` (Slack allowlist invariant), `docs/phase-1-human-steps.md` section 3.3 (the `slack.yaml` shape) |
-| `cmd/chuck/main.go` (env vars and defaults) | its package doc comment, `Dockerfile` `ENV`, `deploy/entrypoint.sh`, `deploy/litestream.yml`, `deploy/smoke-restore.sh`, `deploy/fly.toml` `[env]`, `Makefile` `run`, `docs/phase-1-human-steps.md` (secret and env names) |
+| `cmd/chuck/main.go` (env vars and defaults) | its package doc comment, `Dockerfile` `ENV`, `deploy/entrypoint.sh`, `deploy/litestream.yml`, `deploy/smoke-restore.sh`, `deploy/fly.toml` `[env]`, `Makefile` `run`, `docs/phase-1-human-steps.md` (secret and env names), `.env.example` (names checked against the doc comment by `cmd/chuck/dotenv_test.go`), `README.md` "Running locally" |
 | `Makefile` targets | `README.md` "Development", this profile's `## Mechanical checks` |
 | `.github/workflows/ci.yml` checks | this profile's `## Mechanical checks` |
 | Current phase | `README.md` status line, `deploy/worker.Dockerfile`, `internal/memory/migrations/0001_boots.sql` |
@@ -168,8 +168,10 @@ HMAC-SHA256 signature check (see `## Threat model`). GitHub identity is
 two private GitHub Apps in production — one owned by `orionsbelt-dev`, one
 by `cwinters8`, sharing one webhook secret — plus a dev App for local
 testing; all three get read-only repository permissions (Actions, Contents,
-Issues, Metadata, Pull requests) and no private key, since chuck makes no
-GitHub API calls in Phase 1 (`docs/phase-1-human-steps.md` section 1).
+Issues, Metadata, Pull requests). GitHub makes each App generate a private
+key before it can be installed, but the key is deleted rather than given to
+chuck, since chuck makes no GitHub API calls in Phase 1
+(`docs/phase-1-human-steps.md` section 1).
 Slack identity is the owner/member roles in `config/slack.yaml`
 (`internal/config`'s `Slack.RoleOf`), changed only by a merged PR — no chat
 command or runtime path can add a user or change a role (`AGENTS.md`).
@@ -190,8 +192,14 @@ sections 1-3). The Slack channel IDs (`CHUCK_SLACK_MAIN_CHANNEL`,
 `CHUCK_SLACK_SHADOW_CHANNEL`) are set alongside those tokens but are not
 secret. `deploy/fly.toml` `[env]`, `Dockerfile` `ENV` and `config/*.yaml`
 are committed and baked into the image, so they hold non-secret settings
-only. Never commit a secret, a `.db` file or `data/`. `.gitignore` and
-`.dockerignore` exclude the last two.
+only. Local runs are the one exception to the two places: a developer's
+dev credentials (the dev GitHub App's webhook secret, the dev Slack app's
+tokens, an Anthropic key) sit in a `.env` at the repo root that
+`cmd/chuck` loads at startup. It is copied from the committed
+`.env.example`, which holds empty placeholders only. Never commit a secret,
+`.env`, a `.db` file or `data/`. `.gitignore` and `.dockerignore` exclude
+the last three, so `.env` never enters a build context (`make deploy`
+uploads one to Fly's builder).
 
 ## Known gaps
 

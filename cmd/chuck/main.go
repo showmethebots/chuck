@@ -4,7 +4,8 @@
 //	chuck validate  load and validate config, then exit
 //	chuck replay    re-run graded events and report agreement (--db, --since, --fake, --max-usd)
 //
-// Environment:
+// Environment, read from the process and then from ./.env if it exists. A
+// variable already set in the process wins over the same one in .env.
 //
 //	CHUCK_CONFIG_DIR           directory holding routes.yaml and policy.yaml (default ./config)
 //	CHUCK_DB_PATH              SQLite state file (default ./data/chuck.db)
@@ -22,8 +23,10 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"net"
 	"os"
@@ -35,6 +38,7 @@ import (
 	"time"
 
 	"github.com/anthropics/anthropic-sdk-go/option"
+	"github.com/joho/godotenv"
 
 	"github.com/orionsbelt-dev/chuck/internal/config"
 	"github.com/orionsbelt-dev/chuck/internal/daemon"
@@ -50,7 +54,22 @@ var version = "dev"
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	if err := loadDotenv(".env"); err != nil {
+		_, _ = fmt.Fprintf(os.Stderr, "load .env: %v\n", err)
+		os.Exit(1)
+	}
 	os.Exit(run(ctx, os.Args[1:], os.Getenv, os.Stdout, os.Stderr))
+}
+
+// loadDotenv copies variables from the file at path into the process
+// environment, leaving any already set alone. A missing file is not an error:
+// production has none and takes its environment from Fly secrets.
+func loadDotenv(path string) error {
+	err := godotenv.Load(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	return err
 }
 
 func run(ctx context.Context, args []string, getenv func(string) string, stdout, stderr io.Writer) int {
