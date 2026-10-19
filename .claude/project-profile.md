@@ -193,13 +193,13 @@ sections 1-3). The Slack channel IDs (`CHUCK_SLACK_MAIN_CHANNEL`,
 secret. `deploy/fly.toml` `[env]`, `Dockerfile` `ENV` and `config/*.yaml`
 are committed and baked into the image, so they hold non-secret settings
 only. Local runs are the one exception to the two places: a developer's
-dev credentials (the dev GitHub App's webhook secret, the dev Slack app's
-tokens, an Anthropic key) sit in a `.env` at the repo root that
-`cmd/chuck` loads at startup. It is copied from the committed
-`.env.example`, which holds empty placeholders only. Never commit a secret,
-`.env`, a `.db` file or `data/`. `.gitignore` and `.dockerignore` exclude
-the last three, so `.env` never enters a build context (`make deploy`
-uploads one to Fly's builder).
+credentials (the dev GitHub App's webhook secret, the dev Slack app's
+tokens, and whatever `ANTHROPIC_API_KEY` they use) sit in a `.env` at the
+repo root that `cmd/chuck` loads at startup. It is copied from the
+committed `.env.example`, which holds empty placeholders only. Never commit
+a secret, `.env`, a `.db` file or `data/`. `.gitignore` and `.dockerignore`
+exclude the last three, so `.env` never enters a Docker build context,
+which `make deploy` sends to Fly's remote builder.
 
 ## Known gaps
 
