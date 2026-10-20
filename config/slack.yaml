@@ -1,0 +1,7 @@
+# Who chuck listens to on Slack. Validated at startup and in CI by
+# `chuck validate`. Unknown keys fail. Changes only by PR: no chat command
+# adds a user or changes a role. IDs must match ^[UW][A-Z0-9]{8,}$, the owner
+# may not also be a member, and no ID may appear twice.
+
+owner: U06DHTL9EQ1 # Clark
+members: []
