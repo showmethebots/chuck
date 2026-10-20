@@ -122,6 +122,24 @@ func (s *Store) RecordBoot(ctx context.Context, version string) (int64, error) {
 	return n, err
 }
 
+// OpenReadOnly opens an existing database for reading only, without
+// migrating it: replay runs against production state and must not change it.
+func OpenReadOnly(ctx context.Context, path string) (*Store, error) {
+	if _, err := os.Stat(path); err != nil {
+		return nil, err
+	}
+	db, err := sql.Open("sqlite", "file:"+path+"?mode=ro&_pragma=query_only(1)&_pragma=busy_timeout(5000)")
+	if err != nil {
+		return nil, err
+	}
+	db.SetMaxOpenConns(1)
+	if err := db.PingContext(ctx); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("open %s read-only: %w", path, err)
+	}
+	return &Store{db: db}, nil
+}
+
 // tsFormat is fixed-width so timestamps sort correctly as text. RFC3339Nano
 // trims trailing zeros, so "…:05Z" would sort after "…:05.1Z".
 const tsFormat = "2006-01-02T15:04:05.000000Z"

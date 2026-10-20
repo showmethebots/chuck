@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -108,7 +109,8 @@ func TestOutboxQueries(t *testing.T) {
 	if err != nil || len(pending) != 2 || pending[0].ID != grade || pending[1].ID != approval {
 		t.Fatalf("PendingPosts = %+v, %v", pending, err)
 	}
-	if err := s.MarkPosted(ctx, grade, "C1", "111.222", t0); err != nil {
+	msg := Message{Channel: "C1", TS: "111.222", Direction: "out", Kind: "post", Text: "posted", Allowed: true, CreatedAt: t0}
+	if err := s.MarkPosted(ctx, grade, msg); err != nil {
 		t.Fatal(err)
 	}
 	pending, _ = s.PendingPosts(ctx, 10)
@@ -118,6 +120,10 @@ func TestOutboxQueries(t *testing.T) {
 	v, _ := s.DecisionView(ctx, grade)
 	if v.SlackChannel != "C1" || v.SlackTS != "111.222" {
 		t.Errorf("slack location = %q %q", v.SlackChannel, v.SlackTS)
+	}
+	msgs, err := s.Messages(ctx)
+	if err != nil || len(msgs) != 1 || msgs[0].Channel != "C1" || msgs[0].TS != "111.222" {
+		t.Fatalf("Messages after MarkPosted = %+v, %v", msgs, err)
 	}
 
 	// Queueing a grade post never overrides an approval post.
@@ -160,5 +166,41 @@ func TestSampleQuietPicksOnlyUnpostedQuietDecisionsInWindow(t *testing.T) {
 	}
 	if ids, _ := s.SampleQuiet(ctx, t0.Add(-time.Hour), t0.Add(time.Hour), 1); len(ids) != 1 {
 		t.Fatalf("limit not applied: %v", ids)
+	}
+}
+
+func TestDecisionViewURLFromPayload(t *testing.T) {
+	ctx := context.Background()
+	s := openTemp(t, filepath.Join(t.TempDir(), "state.db"))
+	defer func() { _ = s.Close() }()
+
+	fixture := func(name string) []byte {
+		b, err := os.ReadFile(filepath.Join("..", "testdata", "github", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return b
+	}
+	for _, tc := range []struct {
+		kind    string
+		payload []byte
+		want    string
+	}{
+		{"issues.opened", fixture("issues_opened.json"), "https://github.com/orionsbelt-dev/demos/issues/7"},
+		{"issue_comment.created", fixture("issue_comment_created.json"), "https://github.com/orionsbelt-dev/demos/issues/7"},
+		{"pull_request_review.submitted", fixture("pull_request_review_submitted.json"), "https://github.com/orionsbelt-dev/demos/pull/8"},
+		{"workflow_run.completed", fixture("workflow_run_completed.json"), "https://github.com/orionsbelt-dev/demos/actions/runs/42"},
+		{"push", fixture("push.json"), "https://github.com/orionsbelt-dev/demos/compare/abc123...def456"},
+		{"ping", []byte(`{}`), ""},
+	} {
+		ev := insertEvent(t, s, Event{DeliveryID: tc.kind, Kind: tc.kind, Repo: "o/r", Payload: tc.payload, ReceivedAt: t0})
+		id := recordDecision(t, s, Decision{EventID: ev, WouldDo: "none"})
+		v, err := s.DecisionView(ctx, id)
+		if err != nil {
+			t.Fatalf("%s: %v", tc.kind, err)
+		}
+		if v.URL != tc.want {
+			t.Errorf("%s: URL = %q, want %q", tc.kind, v.URL, tc.want)
+		}
 	}
 }

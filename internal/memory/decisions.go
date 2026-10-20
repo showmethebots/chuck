@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"fmt"
 	"time"
 )
 
@@ -49,6 +50,7 @@ type DecisionView struct {
 	Grade            string // latest grade: "", "up", "down"
 	ApprovalResponse string // "", "approve", "deny"
 	ApprovalBy       string
+	URL              string // the event's GitHub page, or "" when the payload has none
 }
 
 // RecordDecision stores d and marks its event triaged, in one transaction.
@@ -99,12 +101,18 @@ func (s *Store) SpendSince(ctx context.Context, since time.Time) (float64, error
 	return usd, err
 }
 
+// viewQuery's last column is the event's GitHub page. payload is stored as a
+// BLOB, which SQLite's JSON functions first try to read as JSONB; the CAST
+// makes them read it as the text JSON it is. pull_request comes before issue
+// so review events link to the PR.
 const viewQuery = `SELECT d.id, d.event_id, d.stage, d.outcome, d.category, d.would_do, d.permission,
 	d.target, d.confidence, d.rationale, d.raw_output, d.model, d.input_tokens, d.output_tokens,
 	d.cost_usd, COALESCE(d.post_kind, ''), COALESCE(d.slack_channel, ''), COALESCE(d.slack_ts, ''),
 	d.created_at, e.repo, e.kind,
 	COALESCE((SELECT g.grade FROM grades g WHERE g.decision_id = d.id ORDER BY g.id DESC LIMIT 1), ''),
-	COALESCE(a.response, ''), COALESCE(a.responder_slack_user, '')
+	COALESCE(a.response, ''), COALESCE(a.responder_slack_user, ''),
+	COALESCE(CAST(e.payload AS TEXT) ->> '$.pull_request.html_url', CAST(e.payload AS TEXT) ->> '$.issue.html_url',
+		CAST(e.payload AS TEXT) ->> '$.workflow_run.html_url', CAST(e.payload AS TEXT) ->> '$.compare', '')
 	FROM decisions d
 	JOIN events e ON e.id = d.event_id
 	LEFT JOIN approvals a ON a.decision_id = d.id`
@@ -115,7 +123,7 @@ func scanView(sc scanner) (DecisionView, error) {
 	err := sc.Scan(&v.ID, &v.EventID, &v.Stage, &v.Outcome, &v.Category, &v.WouldDo, &v.Permission,
 		&v.Target, &v.Confidence, &v.Rationale, &v.RawOutput, &v.Model, &v.InputTokens, &v.OutputTokens,
 		&v.CostUSD, &v.PostKind, &v.SlackChannel, &v.SlackTS,
-		&created, &v.Repo, &v.Kind, &v.Grade, &v.ApprovalResponse, &v.ApprovalBy)
+		&created, &v.Repo, &v.Kind, &v.Grade, &v.ApprovalResponse, &v.ApprovalBy, &v.URL)
 	if err != nil {
 		return DecisionView{}, err
 	}
@@ -156,11 +164,38 @@ func (s *Store) PendingPosts(ctx context.Context, limit int) ([]DecisionView, er
 	return s.views(ctx, `WHERE d.post_kind IS NOT NULL AND d.slack_posted_at IS NULL ORDER BY d.id LIMIT ?`, limit)
 }
 
-// MarkPosted records where a decision's Slack post landed.
-func (s *Store) MarkPosted(ctx context.Context, id int64, channel, slackTS string, at time.Time) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE decisions SET slack_channel = ?, slack_ts = ?, slack_posted_at = ?
-		WHERE id = ?`, channel, slackTS, ts(at), id)
-	return err
+// MarkPosted records where a decision's Slack post landed and appends the
+// sent message to the audit trail, in one transaction: a message row must
+// never exist without the decision reflecting where it was posted, or vice
+// versa. It returns an error, with no message row inserted, if the decision
+// does not exist (the UPDATE affects 0 rows).
+func (s *Store) MarkPosted(ctx context.Context, id int64, m Message) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	res, err := tx.ExecContext(ctx, `UPDATE decisions SET slack_channel = ?, slack_ts = ?, slack_posted_at = ?
+		WHERE id = ?`, m.Channel, m.TS, ts(m.CreatedAt), id)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return fmt.Errorf("MarkPosted: decision %d not found", id)
+	}
+
+	if _, err := tx.ExecContext(ctx, `INSERT INTO messages
+		(slack_channel, slack_ts, slack_user, direction, kind, text, allowed, changed_state, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		m.Channel, m.TS, m.User, m.Direction, m.Kind, m.Text, m.Allowed, m.ChangedState, ts(m.CreatedAt)); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // QueueGradePosts asks for grade posts on decisions that have no post yet.

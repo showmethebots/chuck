@@ -246,12 +246,14 @@ Gains the triage loop:
 2. Take the oldest event with `triaged_at IS NULL`.
 3. Rules, then classifier. Write the decision and set `triaged_at` in one
    transaction.
-4. Classifier errors (API error after the SDK's own retries) increment
-   `events.attempts` and leave the event untriaged with a backoff; after 3
-   attempts write a `triage_failed` decision and move on. Errors that would
-   fail every event alike (bad key, billing, a Console spend limit, rate
-   limits, outages, network failures; `triage.Systemic`) charge no attempt:
-   the loop leaves the queue alone and backs off instead.
+4. Classifier errors (after the SDK's own retries) split two ways.
+   Systemic ones (401, 402, 403, 408, 409, 429, 5xx, a 400 carrying the
+   Console spend-limit message, network, context; `triage.Systemic`) are not
+   about the event: the loop as a whole backs off (1 m, then 5 m) without
+   charging the event, so a bad key, billing problem, spend limit or outage
+   never burns the backlog. Other API errors increment `events.attempts` and
+   leave the event untriaged with a backoff; after 3 attempts write a
+   `triage_failed` decision and move on.
 5. Flush the outbox.
 6. Log the decision as one structured JSON line: event id, kind, repo,
    stage, outcome, category, would_do, cost.
