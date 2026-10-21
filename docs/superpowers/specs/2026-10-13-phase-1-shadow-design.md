@@ -32,12 +32,12 @@ dataset that Phase 2's router is tested against.
 | Decision | Choice | Why |
 |---|---|---|
 | Event pipeline | SQLite-backed queue: webhook stores raw event and returns 202; an in-daemon loop triages | GitHub's 10 s delivery timeout; `pause` needs something to hold back; restarts lose nothing; replay is the same loop |
-| Triage output | Structured JSON validated in code | Replay and Phase 2 need comparable fields; grades attach to a specific claim |
+| Triage output | Structured JSON validated in code | Replay and Phase 2 need comparable fields; grades attach to a specific claim. Amended 2026-10-20: triage proposes a worker task or an `ask_first` action, see `2026-10-20-triage-dispatch-design.md` |
 | GitHub source | Read-only GitHub Apps, not repo/org webhooks: one private App owned by `orionsbelt-dev`, one owned by `cwinters8`, same webhook URL and secret | Personal accounts have no account-level webhook; a private App installs only on its owner, and a public one could be installed by anyone to feed chuck events; Phase 3 needs Apps for scoped tokens anyway |
 | Sources | App installed on all of `orionsbelt-dev`, plus `cwinters8/agent-ci-kit`, `cwinters8/agent-skills`, `cwinters8/content-workshop` | Measured activity, below |
 | Shadow scope | Every repo in the App installation is treated as handed off, for would-have-done purposes only | Nothing is handed off yet; harmless because nothing executes |
 | Approvals | `ask_first` would-dos post real approval requests; answers are logged; nothing executes | Exercises the whole approval round-trip at zero risk |
-| Grading | Owner-only 👍/👎 on every would-act decision plus a daily random sample of would-do-nothing decisions | Defines "correct"; keeps grading to roughly 10–20 a day |
+| Grading | Owner-only 👍/👎 on every would-act decision plus a daily random sample of would-do-nothing decisions | Defines "correct"; keeps grading to roughly 10–20 a day. Amended 2026-10-20: a task decision gets a grade post, an `ask_first` action gets an approval post, see `2026-10-20-triage-dispatch-design.md` |
 | Noise rules | In Go, table-tested | Phase 2's router is where rules move to YAML; designing the format now would mean doing it twice |
 | Dev/test repo | `orionsbelt-dev/demos` | It is the Phase 3 pilot; near-zero natural traffic, so test traffic there is deliberate |
 | Migrations | New `0002_shadow.sql`; `0001_boots.sql` stays as shipped | The runner tracks migrations by filename, so an edited 0001 never re-runs on production and schemas would silently diverge |
@@ -175,20 +175,25 @@ comments read as `User`, as before. The longer-term fix is a separate GitHub
 identity for agents, decided in Phase 3 alongside chuck's own write
 identity.
 
-`Result` fields:
+`Result` fields (**updated 2026-10-20** to the shape that shipped in
+`2026-10-20-triage-dispatch-design.md`, which has the rationale for the
+`task`/`would_do` split):
 
 | Field | Type | Values |
 |---|---|---|
 | `category` | enum | `ci_failure`, `review_feedback`, `pr_lifecycle`, `new_issue`, `issue_discussion`, `push`, `noise` |
-| `would_do` | string | an action declared in `policy.yaml`, excluding `read` and `triage`, or `none` |
-| `target` | string | `https://github.com/` URL of the PR, issue, or run the action applies to; empty when `would_do` is `none` |
+| `task` | string | a dispatch task declared in `routes.yaml`'s `tasks.dispatch`, or `none` |
+| `would_do` | string | an `ask_first` action declared in `policy.yaml`, or `none`. At most one of `task` and `would_do` is a real value; both may be `none` |
+| `target` | string | `https://github.com/` URL the task or action applies to; required when `task` or `would_do` is not `none`, empty otherwise |
+| `ask` | string | one line: what the event wants, in the model's words; required when `task` or `would_do` is not `none` |
 | `confidence` | number | 0–1 |
-| `rationale` | string | one sentence |
+| `rationale` | string | one sentence saying why this task or action, not what the event is |
 
-Validation in Go after decoding: `category` in the enum, `would_do` is `none`
-or `policy.PermissionOf(would_do)` is defined, `target` is a
-`https://github.com/` URL when `would_do` is not `none`, `confidence` in
-range. Any failure is a
+Validation in Go after decoding: `category` in the enum; `task` is `none` or
+a declared dispatch task; `would_do` is `none` or a declared `ask_first`
+action; `task` and `would_do` are not both real values; `target` is a
+`https://github.com/` URL and `ask` is non-empty whenever `task` or
+`would_do` is not `none`; `confidence` in range. Any failure is a
 `triage_failed` decision carrying the raw model output; it is never trusted
 or posted as a proposal.
 
@@ -221,9 +226,15 @@ would-do and its permission tier from `policy.yaml`, confidence, rationale,
 and 👍/👎 buttons. Owner only. Regrading is allowed; the latest grade counts.
 The post is updated to show the current grade.
 
-Every decision whose `would_do` is not `none` gets a grade post. Others get
-one only when the daily sample picks them. `triage_failed` decisions are not
-posted individually; they are counted in the daily summary.
+Superseded by 2026-10-20-triage-dispatch-design.md: posts now lead with the
+dispatched task (or the ask_first action) plus Ask/Why lines, not the
+would-do/permission-tier line described above.
+
+**Updated 2026-10-20:** every decision whose `task` is not `none` gets a
+grade post; a decision whose `would_do` is in `ask_first` gets an approval
+post (below) instead, not a grade post. Others get a grade post only when
+the daily sample picks them. `triage_failed` decisions are not posted
+individually; they are counted in the daily summary.
 
 **Approval posts** go to #chuck for decisions whose `would_do` is in
 `ask_first`. Header: *SHADOW — nothing will execute*. Approve/Deny buttons,
@@ -434,9 +445,9 @@ file first.
 For graded decisions it reports, per category and overall:
 
 - **👍 agreement:** share of 👍 decisions where the replay produces the same
-  outcome, category, and would-do.
+  outcome, category, task, and would-do.
 - **👎 divergence:** share of 👎 decisions where the replay produces a
-  different outcome or would-do.
+  different outcome, task, or would-do.
 
 `--fake` uses the fake classifier (CI). Without it, real Haiku, and the
 report includes the run's cost.
@@ -461,6 +472,12 @@ measurable terms. All must hold:
    versions.
 
 The daily summary reports progress on 2–4.
+
+**Amended 2026-10-20:** the exit window restarted when the triage-dispatch
+change (`2026-10-20-triage-dispatch-design.md`) deployed. All counts above
+cover decisions with `triage_version` 2 only; the daily summary's "Exit
+progress" line and `chuck replay`'s default selection apply the same filter.
+Older decisions and grades stay in the database untouched.
 
 ## Risks
 

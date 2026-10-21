@@ -9,18 +9,18 @@ import (
 	"github.com/orionsbelt-dev/chuck/internal/memory"
 )
 
-func testPolicy() config.Policy {
-	return config.Policy{
-		Permissions: config.Permissions{
-			ActFreely:     []string{"read", "triage", "comment_issue"},
-			ActThenNotify: []string{"create_issue"},
-			AskFirst:      []string{"merge"},
+func testMenu() Menu {
+	return Menu{
+		Tasks: []config.Task{
+			{Name: "address_review", Description: "Review feedback."},
+			{Name: "implement_issue", Description: "An actionable issue."},
 		},
-		Budgets: config.Budgets{DailyUSD: map[config.Tier]float64{
-			config.TierHaiku: 1, config.TierSonnet: 1, config.TierOpus: 1,
-		}},
+		Actions: []string{"merge"},
 	}
 }
+
+// implementRaw is valid model output proposing the implement_issue task.
+const implementRaw = `{"category":"new_issue","task":"implement_issue","would_do":"none","target":"https://github.com/orionsbelt-dev/demos/issues/7","ask":"fix the 404 on refresh","confidence":0.8,"rationale":"actionable bug report"}`
 
 // stubClassifier returns raw (or err) and records the inputs it saw. model
 // defaults to HaikuModel when unset, so existing callers that don't care
@@ -48,7 +48,7 @@ func (s *stubClassifier) Classify(_ context.Context, in Input) (string, Usage, e
 
 func TestDecideDropsByRuleWithoutCallingModel(t *testing.T) {
 	c := &stubClassifier{}
-	v, err := Decide(context.Background(), "workflow_run.requested", "o/r", []byte(`{}`), c, testPolicy())
+	v, err := Decide(context.Background(), "workflow_run.requested", "o/r", []byte(`{}`), c, testMenu())
 	if err != nil || v.Stage != memory.StageRule || v.Outcome != memory.OutcomeDropped || v.Rationale != "workflow_run_not_completed" {
 		t.Fatalf("verdict = %+v, %v", v, err)
 	}
@@ -58,12 +58,13 @@ func TestDecideDropsByRuleWithoutCallingModel(t *testing.T) {
 }
 
 func TestDecideOK(t *testing.T) {
-	c := &stubClassifier{raw: `{"category":"new_issue","would_do":"comment_issue","target":"https://github.com/orionsbelt-dev/demos/issues/7","confidence":0.8,"rationale":"needs repro steps"}`}
-	v, err := Decide(context.Background(), "issues.opened", "orionsbelt-dev/demos", fixture(t, "issues_opened.json"), c, testPolicy())
+	c := &stubClassifier{raw: implementRaw}
+	v, err := Decide(context.Background(), "issues.opened", "orionsbelt-dev/demos", fixture(t, "issues_opened.json"), c, testMenu())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if v.Outcome != memory.OutcomeOK || v.WouldDo != "comment_issue" || v.Permission != config.ActFreely || v.CostUSD != 0.0015 || v.RawOutput != c.raw {
+	if v.Outcome != memory.OutcomeOK || v.Task != "implement_issue" || v.Ask != "fix the 404 on refresh" || v.WouldDo != None ||
+		v.Permission != "" || v.CostUSD != 0.0015 || v.RawOutput != c.raw {
 		t.Fatalf("verdict = %+v", v)
 	}
 	if c.inputs[0].Title != "Demo page 404s on refresh" {
@@ -72,8 +73,8 @@ func TestDecideOK(t *testing.T) {
 }
 
 func TestDecideInvalidOutputIsFailedWithCost(t *testing.T) {
-	c := &stubClassifier{raw: `{"category":"noise","would_do":"delete_repo","target":"https://github.com/o/r","confidence":0.5,"rationale":"x"}`}
-	v, err := Decide(context.Background(), "issues.opened", "o/r", fixture(t, "issues_opened.json"), c, testPolicy())
+	c := &stubClassifier{raw: `{"category":"noise","task":"none","would_do":"delete_repo","target":"https://github.com/o/r","ask":"x","confidence":0.5,"rationale":"x"}`}
+	v, err := Decide(context.Background(), "issues.opened", "o/r", fixture(t, "issues_opened.json"), c, testMenu())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +84,7 @@ func TestDecideInvalidOutputIsFailedWithCost(t *testing.T) {
 }
 
 func TestDecideBadPayloadIsFailed(t *testing.T) {
-	v, err := Decide(context.Background(), "issues.opened", "o/r", []byte("nope"), &stubClassifier{}, testPolicy())
+	v, err := Decide(context.Background(), "issues.opened", "o/r", []byte("nope"), &stubClassifier{}, testMenu())
 	if err != nil || v.Outcome != memory.OutcomeFailed {
 		t.Fatalf("verdict = %+v, %v", v, err)
 	}
@@ -91,10 +92,10 @@ func TestDecideBadPayloadIsFailed(t *testing.T) {
 
 func TestDecideUnpricedModelIsFailedWithOutputPreserved(t *testing.T) {
 	c := &stubClassifier{
-		raw:   `{"category":"new_issue","would_do":"comment_issue","target":"https://github.com/orionsbelt-dev/demos/issues/7","confidence":0.8,"rationale":"needs repro steps"}`,
+		raw:   implementRaw,
 		model: "claude-unknown",
 	}
-	v, err := Decide(context.Background(), "issues.opened", "orionsbelt-dev/demos", fixture(t, "issues_opened.json"), c, testPolicy())
+	v, err := Decide(context.Background(), "issues.opened", "orionsbelt-dev/demos", fixture(t, "issues_opened.json"), c, testMenu())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +114,7 @@ func TestDecideUnpricedModelIsFailedWithOutputPreserved(t *testing.T) {
 }
 
 func TestDecideClassifierErrorIsReturned(t *testing.T) {
-	_, err := Decide(context.Background(), "issues.opened", "o/r", fixture(t, "issues_opened.json"), &stubClassifier{err: errors.New("529 overloaded")}, testPolicy())
+	_, err := Decide(context.Background(), "issues.opened", "o/r", fixture(t, "issues_opened.json"), &stubClassifier{err: errors.New("529 overloaded")}, testMenu())
 	if err == nil {
 		t.Fatal("classifier error swallowed")
 	}

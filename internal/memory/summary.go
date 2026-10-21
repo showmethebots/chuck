@@ -5,18 +5,19 @@ import (
 	"time"
 )
 
-// Summary is the daily report: activity in [Since, Until), plus all-time
-// grade totals that track the Phase 1 exit criterion.
+// Summary is the daily report: activity in [Since, Until), plus
+// current-triage-version grade totals that track the Phase 1 exit
+// criterion.
 type Summary struct {
 	Since, Until   time.Time
 	Outcomes       map[string]int // decisions by outcome, in window
 	Categories     map[string]int // ok decisions by category, in window
 	SpendUSD       float64        // in window
 	GradedInWindow int            // grade clicks in window
-	Graded         int            // decisions with a grade, all time
+	Graded         int            // decisions with a grade, current triage version, all time
 	Up             int            // of those, latest grade 👍
 	AskFirstDown   int            // ask_first decisions whose latest grade is 👎
-	PendingGrades  int            // posted for grading, never graded
+	PendingGrades  int            // posted for grading, never graded, current triage version, all time
 	Rejected       int            // inbound Slack interactions refused by the allowlist, all time
 	Violations     int            // refused interactions that changed state anyway; must stay 0
 }
@@ -67,11 +68,13 @@ func (s *Store) Summary(ctx context.Context, since, until time.Time) (Summary, e
 		SELECT COUNT(*),
 		       COALESCE(SUM(latest.grade = 'up'), 0),
 		       COALESCE(SUM(latest.grade = 'down' AND d.permission = 'ask_first'), 0)
-		FROM latest JOIN decisions d ON d.id = latest.decision_id`).Scan(&sum.Graded, &sum.Up, &sum.AskFirstDown); err != nil {
+		FROM latest JOIN decisions d ON d.id = latest.decision_id
+		WHERE d.triage_version = ?`, TriageVersion).Scan(&sum.Graded, &sum.Up, &sum.AskFirstDown); err != nil {
 		return sum, err
 	}
 	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM decisions d
-		WHERE d.post_kind IS NOT NULL AND NOT EXISTS (SELECT 1 FROM grades g WHERE g.decision_id = d.id)`).Scan(&sum.PendingGrades); err != nil {
+		WHERE d.post_kind IS NOT NULL AND d.triage_version = ?
+		  AND NOT EXISTS (SELECT 1 FROM grades g WHERE g.decision_id = d.id)`, TriageVersion).Scan(&sum.PendingGrades); err != nil {
 		return sum, err
 	}
 	err = s.db.QueryRowContext(ctx, `SELECT COUNT(*), COALESCE(SUM(changed_state), 0) FROM messages

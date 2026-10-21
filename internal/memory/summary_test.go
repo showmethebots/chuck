@@ -25,6 +25,10 @@ func TestSummary(t *testing.T) {
 	add(Decision{Outcome: OutcomeFailed, CostUSD: 0.01})
 	add(Decision{Category: "push", WouldDo: "create_issue", PostKind: PostGrade})                     // pending grade
 	add(Decision{Category: "noise", WouldDo: "none", CostUSD: 5, CreatedAt: t0.Add(-48 * time.Hour)}) // outside window
+	preChangeGraded := add(Decision{Category: "noise", WouldDo: "merge", Permission: "ask_first", CreatedAt: t0.Add(-48 * time.Hour)})
+	markPreChange(t, s, preChangeGraded)
+	preChangePending := add(Decision{Category: "noise", WouldDo: "none", PostKind: PostGrade, CreatedAt: t0.Add(-48 * time.Hour)})
+	markPreChange(t, s, preChangePending)
 
 	if err := s.RecordGrade(ctx, upOK, "down", "UOWNER0001", t0); err != nil {
 		t.Fatal(err)
@@ -33,6 +37,9 @@ func TestSummary(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := s.RecordGrade(ctx, downAsk, "down", "UOWNER0001", t0.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RecordGrade(ctx, preChangeGraded, "down", "UOWNER0001", t0.Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -49,7 +56,7 @@ func TestSummary(t *testing.T) {
 	if sum.SpendUSD < 0.0499 || sum.SpendUSD > 0.0501 {
 		t.Errorf("spend = %v, want 0.05", sum.SpendUSD)
 	}
-	if sum.GradedInWindow != 3 || sum.Graded != 2 || sum.Up != 1 || sum.AskFirstDown != 1 || sum.PendingGrades != 1 {
+	if sum.GradedInWindow != 4 || sum.Graded != 2 || sum.Up != 1 || sum.AskFirstDown != 1 || sum.PendingGrades != 1 {
 		t.Errorf("grades: in window %d, graded %d, up %d, ask_first down %d, pending %d",
 			sum.GradedInWindow, sum.Graded, sum.Up, sum.AskFirstDown, sum.PendingGrades)
 	}

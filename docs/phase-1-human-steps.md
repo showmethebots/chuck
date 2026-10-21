@@ -199,9 +199,11 @@ Expect a burst on the first connection. Every decision queued since triage
 went live (section 2) posts now: grade posts in `#chuck-shadow` and approval
 requests in `#chuck`, about 20 every 5 seconds until the backlog clears.
 `fly logs` may show Slack rate-limit warnings while it drains; posts that hit
-one are retried, not lost. These are real decisions: grade them, and they
-count toward the 100-graded target. Old approval requests can be answered or
-ignored.
+one are retried, not lost. These are real decisions: grade them. Whether a
+grade counts toward the 100-graded target depends on when the *decision*
+was made, not when it's graded (see section 5) — a decision made before the
+exit window's current start never counts, no matter when you grade it. Old
+approval requests can be answered or ignored.
 
 ### 3.6 Second Slack account
 
@@ -224,13 +226,20 @@ the second account. Report anything that differs in the chuck session.
 
 ## 5. The shadow week
 
-The week starts once the checklist passes.
+The week starts once the checklist passes. The exit window restarts
+whenever a change bumps `triage_version`; the first restart was the
+2026-10-20 triage-dispatch change (`triage_version` 2), so counts only
+include decisions made after that deploy. Tuning the prompt alone, without
+bumping `triage_version`, does not restart the window — the exit criterion
+expects the prompt to be tuned during the week on a single running count.
+The daily summary's "Exit progress" line and `chuck replay`'s default
+selection apply the same filter.
 
 - **Daily:** grade the posts in `#chuck-shadow` and answer approvals in
   `#chuck`. Grade what chuck would do, not whether the event mattered: 👍
-  when the proposed action (or "nothing") is what you would want, 👎 when
-  it is not. The daily summary in `#chuck` tracks progress against the exit
-  criterion.
+  when the proposed task or action (or "nothing") is what you would want,
+  👎 when it is not. The daily summary in `#chuck` tracks progress against
+  the exit criterion.
 - **If grading is too much:** say so in the chuck session; the sample size
   (`CHUCK_GRADE_SAMPLE`) and the noise rules can change.
 - **End of week:** with at least 100 graded decisions, run the replay on

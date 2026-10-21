@@ -30,7 +30,7 @@ make smoke
 | `deploy/fly.toml` (app name, region, volume name, single Machine, and its location under `deploy/`) | `deploy/README.md` intro note and bootstrap and exit-check commands (**followed against the Fly account**), `AGENTS.md` conventions (`-c deploy/fly.toml`), `Makefile` `deploy`, `.github/workflows/ci.yml` deploy step, the `fly.toml` header comment |
 | `deploy/entrypoint.sh` / `deploy/litestream.yml` (replica URL, Tigris secrets) | `deploy/README.md` step 3 (**followed against the Fly account**) |
 | `deploy/smoke-restore.sh` | `deploy/README.md` "Phase 0 exit check" |
-| `internal/config/config.go` (validation rules) | `README.md` "Config", header comments in `config/routes.yaml`, `config/policy.yaml` and `config/slack.yaml`, `AGENTS.md` (Slack allowlist invariant), `docs/phase-1-human-steps.md` section 3.3 (the `slack.yaml` shape) |
+| `internal/config/config.go` (validation rules) | `README.md` "Config", header comments in `config/routes.yaml`, `config/policy.yaml` and `config/slack.yaml`, `AGENTS.md` (Slack allowlist and task-declaration invariants), `docs/phase-1-human-steps.md` section 3.3 (the `slack.yaml` shape) |
 | `cmd/chuck/main.go` (env vars and defaults) | its package doc comment, `Dockerfile` `ENV`, `deploy/entrypoint.sh`, `deploy/litestream.yml`, `deploy/smoke-restore.sh`, `deploy/fly.toml` `[env]`, `Makefile` `run`, `docs/phase-1-human-steps.md` (secret and env names), `.env.example` (names checked against the doc comment by `cmd/chuck/dotenv_test.go`), `README.md` "Running locally" |
 | `Makefile` targets | `README.md` "Development", this profile's `## Mechanical checks` |
 | `.github/workflows/ci.yml` checks | this profile's `## Mechanical checks` |
@@ -124,14 +124,16 @@ The product's own authorization model is the permission tiers in
 `ask_first` action reach a model tier is the critical failure. Phase 1 also
 sends untrusted GitHub text (issue bodies, comments, review text) to Haiku
 for triage (`internal/triage`); that text is data, never instructions —
-the model's output is validated against `policy.yaml`'s declared actions,
-a proposed `target` must be a `https://github.com/` URL, `</event>` is
-escaped in the prompt so untrusted text can't close the tag early, and the
-agent marker (`<!-- agent: <skill> -->`) is honoured only when the text's
-own author (`user.login`) is `cwinters8`. Decision posts escape `&`, `<`
-and `>` in the model's `target` and rationale and in the event URL
-(`internal/notify`), so the output can't post `<!channel>` or a link whose
-label hides its URL. Phase 1 executes nothing: triage
+the model's output is validated against `policy.yaml`'s declared actions
+and `routes.yaml`'s declared dispatch tasks (at most one of `task` and
+`would_do` may be a real value), a proposed `target` must be a
+`https://github.com/` URL, `</event>` is escaped in the prompt so untrusted
+text can't close the tag early, and the agent marker (`<!-- agent: <skill>
+-->`) is honoured only when the text's own author (`user.login`) is
+`cwinters8`. Decision posts escape `&`, `<` and `>` in the model's `target`,
+`ask`, and rationale and in the event URL (`internal/notify`), so the
+output can't post `<!channel>` or a link whose label hides its URL. Phase 1
+executes nothing: triage
 only records a decision and, for `ask_first` proposals, an approval — no
 code path acts on either.
 

@@ -7,7 +7,6 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"github.com/orionsbelt-dev/chuck/internal/config"
 	"github.com/orionsbelt-dev/chuck/internal/memory"
 )
 
@@ -35,14 +34,14 @@ type ReplayReport struct {
 // Stopped. maxUSD <= 0 means no cap, for tests and --fake, which cost
 // nothing; chuck replay rejects it for a real Haiku run. AGENTS.md requires
 // every model tier to have a daily budget; this is replay's.
-func Replay(ctx context.Context, items []memory.Graded, c Classifier, p config.Policy, maxUSD float64) ReplayReport {
+func Replay(ctx context.Context, items []memory.Graded, c Classifier, m Menu, maxUSD float64) ReplayReport {
 	r := ReplayReport{Rows: map[string]*ReplayRow{}, Total: len(items), MaxUSD: maxUSD}
 	for _, it := range items {
 		if maxUSD > 0 && r.CostUSD >= maxUSD {
 			r.Stopped = true
 			break
 		}
-		v, err := Decide(ctx, it.Event.Kind, it.Event.Repo, it.Event.Payload, c, p)
+		v, err := Decide(ctx, it.Event.Kind, it.Event.Repo, it.Event.Payload, c, m)
 		if err != nil {
 			r.Errors++
 			continue
@@ -81,7 +80,7 @@ func sameVerdict(d memory.Decision, v Verdict) bool {
 	}
 	switch d.Outcome {
 	case memory.OutcomeOK:
-		return d.Category == v.Category && d.WouldDo == v.WouldDo
+		return d.Category == v.Category && d.Task == v.Task && d.WouldDo == v.WouldDo
 	case memory.OutcomeDropped:
 		return d.Rationale == v.Rationale
 	}

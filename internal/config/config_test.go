@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -14,8 +15,14 @@ routes:
     tier: sonnet
   - match: {action: [merge, deploy]}
     tier: human
+  - match: {task: triage}
+    tier: haiku
 default: haiku_classify
 promote_after_failures: 2
+tasks:
+  dispatch:
+    - {name: fix_ci, description: A CI run failed or timed out.}
+  internal: [triage]
 `
 
 const validPolicy = `
@@ -87,6 +94,13 @@ func TestLoadParsesValues(t *testing.T) {
 	if got := cfg.Policy.PermissionOf("merge"); got != AskFirst {
 		t.Errorf("PermissionOf(merge) = %q, want ask_first", got)
 	}
+	wantDispatch := []Task{{Name: "fix_ci", Description: "A CI run failed or timed out."}}
+	if !reflect.DeepEqual(cfg.Routes.Tasks.Dispatch, wantDispatch) {
+		t.Errorf("tasks.dispatch = %+v, want %+v", cfg.Routes.Tasks.Dispatch, wantDispatch)
+	}
+	if got := cfg.Routes.Tasks.Internal; len(got) != 1 || got[0] != "triage" {
+		t.Errorf("tasks.internal = %v, want [triage]", got)
+	}
 }
 
 func TestAttemptsMatches(t *testing.T) {
@@ -137,6 +151,14 @@ func TestLoadRejectsInvalid(t *testing.T) {
 		{name: "bad duration", policy: "worker_max_wall_clock: 2h|worker_max_wall_clock: two hours", wantErr: "worker_max_wall_clock"},
 		{name: "missing cap", policy: "  reaper_interval: 5m\n|", wantErr: "caps.reaper_interval must be > 0"},
 		{name: "zero iterations", policy: "task_max_iterations: 10|task_max_iterations: 0", wantErr: "caps.task_max_iterations must be >= 1"},
+		{name: "unknown tasks key", routes: "internal:|intrnal:", wantErr: "intrnal"},
+		{name: "empty task name", routes: `internal: [triage]|internal: [triage, ""]`, wantErr: "tasks.internal[1]: empty name"},
+		{name: "task declared twice", routes: "internal: [triage]|internal: [triage, fix_ci]", wantErr: `task "fix_ci" is declared twice`},
+		{name: "dispatch task named like an action", routes: "name: fix_ci|name: merge", wantErr: `dispatch task "merge" is also a policy.yaml action`},
+		{name: "dispatch task without description", routes: "description: A CI run failed or timed out.|description: \"\"", wantErr: "tasks.dispatch[0]: description is required"},
+		{name: "undeclared route task", routes: "{task: triage}|{task: digset}", wantErr: `task "digset" is not declared in tasks`},
+		{name: "dispatch task named none", routes: "name: fix_ci|name: none", wantErr: `dispatch task "none" is reserved`},
+		{name: "policy action named none", policy: "act_freely: [read, triage]|act_freely: [read, triage, none]", wantErr: `action "none" is reserved`},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

@@ -15,7 +15,10 @@ import (
 )
 
 // runReplay re-runs graded events through the current rules and prompt and
-// prints agreement with the grades. It opens the database read-only.
+// prints agreement with the grades. It opens the database read-only. Only
+// grades of current-triage-version decisions are replayed, whether or not
+// --since is given: a pre-change decision's grade can never count under the
+// current prompt and rules.
 func runReplay(ctx context.Context, args []string, getenv func(string) string, configDir string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("replay", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -60,6 +63,7 @@ func runReplay(ctx context.Context, args []string, getenv func(string) string, c
 		return 1
 	}
 
+	menu := triage.NewMenu(*cfg)
 	var c triage.Classifier
 	spendCap := *maxUSD
 	if *fake {
@@ -71,8 +75,8 @@ func runReplay(ctx context.Context, args []string, getenv func(string) string, c
 			_, _ = fmt.Fprintln(stderr, "replay: set ANTHROPIC_API_KEY, or pass --fake")
 			return 1
 		}
-		c = triage.NewHaiku(cfg.Policy, option.WithAPIKey(key))
+		c = triage.NewHaiku(menu, option.WithAPIKey(key))
 	}
-	_, _ = fmt.Fprint(stdout, triage.Replay(ctx, items, c, cfg.Policy, spendCap).String())
+	_, _ = fmt.Fprint(stdout, triage.Replay(ctx, items, c, menu, spendCap).String())
 	return 0
 }

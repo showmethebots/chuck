@@ -13,10 +13,11 @@ type Graded struct {
 }
 
 // GradedEvents returns graded decisions on GitHub events made at or after
-// since, oldest first, each with its raw event.
+// since, under the current triage version, oldest first, each with its raw
+// event.
 func (s *Store) GradedEvents(ctx context.Context, since time.Time) ([]Graded, error) {
-	views, err := s.views(ctx, `WHERE d.created_at >= ? AND e.source = ?
-		AND EXISTS (SELECT 1 FROM grades g WHERE g.decision_id = d.id) ORDER BY d.id`, ts(since), SourceGitHub)
+	views, err := s.views(ctx, `WHERE d.created_at >= ? AND e.source = ? AND d.triage_version = ?
+		AND EXISTS (SELECT 1 FROM grades g WHERE g.decision_id = d.id) ORDER BY d.id`, ts(since), SourceGitHub, TriageVersion)
 	if err != nil {
 		return nil, err
 	}

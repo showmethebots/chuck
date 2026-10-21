@@ -157,10 +157,12 @@ func runDaemon(ctx context.Context, log *slog.Logger, getenv func(string) string
 	}
 
 	if in.AnthropicKey != "" {
+		menu := triage.NewMenu(*cfg)
 		tr := &daemon.Triage{
 			Store:      store,
-			Classifier: triage.NewHaiku(cfg.Policy, option.WithAPIKey(in.AnthropicKey)),
+			Classifier: triage.NewHaiku(menu, option.WithAPIKey(in.AnthropicKey)),
 			Policy:     cfg.Policy,
+			Menu:       menu,
 			Log:        log,
 		}
 		if sc != nil {

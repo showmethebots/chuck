@@ -6,8 +6,6 @@ import (
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
-
-	"github.com/orionsbelt-dev/chuck/internal/config"
 )
 
 // HaikuModel is the triage model.
@@ -27,13 +25,12 @@ type Haiku struct {
 	schema map[string]any
 }
 
-// NewHaiku builds a classifier for p's actions. Pass option.WithAPIKey.
-func NewHaiku(p config.Policy, opts ...option.RequestOption) *Haiku {
-	actions := ProposableActions(p)
+// NewHaiku builds a classifier that proposes from m. Pass option.WithAPIKey.
+func NewHaiku(m Menu, opts ...option.RequestOption) *Haiku {
 	return &Haiku{
 		client: anthropic.NewClient(opts...),
-		system: systemPrompt(p, actions),
-		schema: resultSchema(actions),
+		system: systemPrompt(m),
+		schema: resultSchema(m),
 	}
 }
 
