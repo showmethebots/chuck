@@ -40,9 +40,9 @@ func TestReplayFake(t *testing.T) {
 		}
 	}
 	seed("issues.opened", "d1", payload, memory.Decision{Stage: memory.StageHaiku, Outcome: memory.OutcomeOK,
-		Category: "new_issue", WouldDo: "comment_issue", Permission: "act_freely",
+		Category: "new_issue", Task: "implement_issue", WouldDo: "none", Ask: "fix the 404 on refresh",
 		Target: "https://github.com/orionsbelt-dev/demos/issues/7", PostKind: memory.PostGrade,
-		RawOutput: `{"category":"new_issue","would_do":"comment_issue","target":"https://github.com/orionsbelt-dev/demos/issues/7","confidence":0.8,"rationale":"r"}`})
+		RawOutput: `{"category":"new_issue","task":"implement_issue","would_do":"none","target":"https://github.com/orionsbelt-dev/demos/issues/7","ask":"fix the 404 on refresh","confidence":0.8,"rationale":"r"}`})
 	seed("ping", "d2", []byte(`{}`), memory.Decision{Stage: memory.StageRule, Outcome: memory.OutcomeDropped,
 		Rationale: "github_app_housekeeping"})
 	if err := s.Close(); err != nil {

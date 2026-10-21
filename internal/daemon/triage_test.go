@@ -37,6 +37,16 @@ func testPolicy() config.Policy {
 	}
 }
 
+func testMenu() triage.Menu {
+	return triage.Menu{
+		Tasks: []config.Task{
+			{Name: "address_review", Description: "Review feedback."},
+			{Name: "implement_issue", Description: "An actionable issue."},
+		},
+		Actions: []string{"merge"},
+	}
+}
+
 type clock struct{ t time.Time }
 
 func (c *clock) now() time.Time { return c.t }
@@ -47,7 +57,7 @@ type scriptedClassifier struct {
 	calls   int
 }
 
-const noneResult = `{"category":"noise","would_do":"none","target":"","confidence":0.9,"rationale":"nothing to do"}`
+const noneResult = `{"category":"noise","task":"none","would_do":"none","target":"","ask":"","confidence":0.9,"rationale":"nothing to do"}`
 
 func (s *scriptedClassifier) Classify(_ context.Context, _ triage.Input) (string, triage.Usage, error) {
 	i := s.calls
@@ -92,7 +102,7 @@ func newTriageEnv(t *testing.T) (*Triage, *memory.Store, *clock, *scriptedClassi
 	t.Cleanup(func() { _ = s.Close() })
 	c := &clock{t: time.Date(2026, 10, 13, 12, 0, 0, 0, time.UTC)}
 	sc := &scriptedClassifier{}
-	return &Triage{Store: s, Classifier: sc, Policy: testPolicy(), Log: discardLog(), Now: c.now}, s, c, sc
+	return &Triage{Store: s, Classifier: sc, Policy: testPolicy(), Menu: testMenu(), Log: discardLog(), Now: c.now}, s, c, sc
 }
 
 func step(t *testing.T, tr *Triage) bool {
@@ -119,11 +129,11 @@ func TestTriageDropsNoiseByRule(t *testing.T) {
 	}
 }
 
-func TestTriagePostKindFollowsPermission(t *testing.T) {
+func TestTriagePostKindFollowsProposal(t *testing.T) {
 	tr, s, c, sc := newTriageEnv(t)
 	sc.outputs = []string{
-		`{"category":"new_issue","would_do":"comment_issue","target":"https://github.com/orionsbelt-dev/demos/issues/7","confidence":0.8,"rationale":"r"}`,
-		`{"category":"pr_lifecycle","would_do":"merge","target":"https://github.com/orionsbelt-dev/demos/pull/8","confidence":0.8,"rationale":"r"}`,
+		`{"category":"new_issue","task":"implement_issue","would_do":"none","target":"https://github.com/orionsbelt-dev/demos/issues/7","ask":"fix the 404","confidence":0.8,"rationale":"r"}`,
+		`{"category":"pr_lifecycle","task":"none","would_do":"merge","target":"https://github.com/orionsbelt-dev/demos/pull/8","ask":"merge the PR","confidence":0.8,"rationale":"r"}`,
 		noneResult,
 	}
 	ids := []int64{
@@ -134,29 +144,30 @@ func TestTriagePostKindFollowsPermission(t *testing.T) {
 	for range ids {
 		step(t, tr)
 	}
-	want := []struct{ kind, perm string }{
-		{memory.PostGrade, "act_freely"},
-		{memory.PostApproval, "ask_first"},
-		{"", ""},
+	want := []struct{ kind, perm, task, ask string }{
+		{memory.PostGrade, "", "implement_issue", "fix the 404"},
+		{memory.PostApproval, "ask_first", "none", "merge the PR"},
+		{"", "", "none", ""},
 	}
 	for i, ev := range ids {
 		d, err := s.DecisionForEvent(context.Background(), ev)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if d.PostKind != want[i].kind || d.Permission != want[i].perm || d.CostUSD != 0.0015 {
-			t.Errorf("event %d: post_kind=%q permission=%q cost=%v, want %+v", i, d.PostKind, d.Permission, d.CostUSD, want[i])
+		if d.PostKind != want[i].kind || d.Permission != want[i].perm || d.Task != want[i].task || d.Ask != want[i].ask || d.CostUSD != 0.0015 {
+			t.Errorf("event %d: post_kind=%q permission=%q task=%q ask=%q cost=%v, want %+v",
+				i, d.PostKind, d.Permission, d.Task, d.Ask, d.CostUSD, want[i])
 		}
 	}
 }
 
 func TestTriageInvalidOutputIsFailedNotPosted(t *testing.T) {
 	tr, s, c, sc := newTriageEnv(t)
-	sc.outputs = []string{`{"category":"noise","would_do":"delete_repo","target":"https://github.com/o/r","confidence":0.5,"rationale":"x"}`}
+	sc.outputs = []string{`{"category":"new_issue","task":"none","would_do":"comment_issue","target":"https://github.com/orionsbelt-dev/demos/issues/7","ask":"x","confidence":0.5,"rationale":"x"}`}
 	ev := addEvent(t, s, "issues.opened", issueFixture(t), c.t)
 	step(t, tr)
 	d, _ := s.DecisionForEvent(context.Background(), ev)
-	if d.Outcome != memory.OutcomeFailed || d.PostKind != "" || !strings.Contains(d.RawOutput, "delete_repo") {
+	if d.Outcome != memory.OutcomeFailed || d.PostKind != "" || !strings.Contains(d.RawOutput, "comment_issue") {
 		t.Fatalf("decision = %+v", d)
 	}
 }
@@ -222,7 +233,7 @@ func newFakeAnthropic(t *testing.T, status int) *fakeAnthropic {
 }
 
 func (f *fakeAnthropic) haiku() *triage.Haiku {
-	return triage.NewHaiku(testPolicy(), option.WithBaseURL(f.srv.URL), option.WithAPIKey("x"), option.WithMaxRetries(0))
+	return triage.NewHaiku(testMenu(), option.WithBaseURL(f.srv.URL), option.WithAPIKey("x"), option.WithMaxRetries(0))
 }
 
 // failSpy counts FailAttempt calls, so a test can prove an error was not
@@ -312,7 +323,7 @@ func TestTriageBacksOffOnSystemicError(t *testing.T) {
 			}
 			for _, id := range ids {
 				d, err := s.DecisionForEvent(context.Background(), id)
-				if err != nil || d.Outcome != memory.OutcomeOK || d.WouldDo != triage.WouldDoNone {
+				if err != nil || d.Outcome != memory.OutcomeOK || d.WouldDo != triage.None {
 					t.Fatalf("event %d: decision = %+v, %v", id, d, err)
 				}
 			}

@@ -37,7 +37,8 @@ func retryAfter(n int) time.Duration {
 type Triage struct {
 	Store      TriageStore
 	Classifier triage.Classifier
-	Policy     config.Policy
+	Policy     config.Policy // for the Haiku daily budget
+	Menu       triage.Menu   // what triage may propose
 	Log        *slog.Logger
 	Now        func() time.Time // nil means time.Now
 	Idle       time.Duration    // wait when there is nothing to do; 0 means 2s
@@ -115,7 +116,7 @@ func (t *Triage) Step(ctx context.Context) (bool, error) {
 	if err != nil || ev == nil {
 		return false, err
 	}
-	v, err := triage.Decide(ctx, ev.Kind, ev.Repo, ev.Payload, t.Classifier, t.Policy)
+	v, err := triage.Decide(ctx, ev.Kind, ev.Repo, ev.Payload, t.Classifier, t.Menu)
 	if triage.Systemic(err) {
 		// Not this event's fault: charging it an attempt would fail the
 		// whole backlog within minutes. Pause the loop instead.
@@ -148,7 +149,7 @@ func (t *Triage) Step(ctx context.Context) (bool, error) {
 	d := memory.Decision{
 		EventID: ev.ID, Stage: v.Stage, Outcome: v.Outcome, Category: v.Category,
 		WouldDo: v.WouldDo, Permission: string(v.Permission), Target: v.Target,
-		Confidence: v.Confidence, Rationale: v.Rationale, RawOutput: v.RawOutput,
+		Confidence: v.Confidence, Rationale: v.Rationale, Task: v.Task, Ask: v.Ask, RawOutput: v.RawOutput,
 		Model: v.Usage.Model, InputTokens: v.Usage.InputTokens, OutputTokens: v.Usage.OutputTokens,
 		CostUSD: v.CostUSD, PostKind: postKind(v), CreatedAt: now,
 	}
@@ -157,20 +158,23 @@ func (t *Triage) Step(ctx context.Context) (bool, error) {
 		return false, err
 	}
 	t.Log.Info("decision", "decision_id", id, "event_id", ev.ID, "kind", ev.Kind, "repo", ev.Repo,
-		"stage", d.Stage, "outcome", d.Outcome, "category", d.Category, "would_do", d.WouldDo,
+		"stage", d.Stage, "outcome", d.Outcome, "category", d.Category, "task", d.Task, "would_do", d.WouldDo,
 		"cost_usd", d.CostUSD)
 	return true, nil
 }
 
 // postKind decides whether a decision gets a Slack post: an approval request
-// for ask_first actions, a grade post for any other proposed action.
+// for an ask_first action, a grade post for a task handed to a worker, and
+// nothing otherwise.
 func postKind(v triage.Verdict) string {
 	switch {
-	case v.Outcome != memory.OutcomeOK || v.WouldDo == triage.WouldDoNone:
+	case v.Outcome != memory.OutcomeOK:
 		return ""
 	case v.Permission == config.AskFirst:
 		return memory.PostApproval
-	default:
+	case v.Task != "" && v.Task != triage.None:
 		return memory.PostGrade
+	default:
+		return ""
 	}
 }

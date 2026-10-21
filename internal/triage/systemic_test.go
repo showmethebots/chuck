@@ -31,8 +31,8 @@ func decideErr(t *testing.T, status int, errType, msg string) error {
 		_, _ = w.Write(body)
 	}))
 	t.Cleanup(srv.Close)
-	h := NewHaiku(testPolicy(), option.WithBaseURL(srv.URL), option.WithAPIKey("x"), option.WithMaxRetries(0))
-	_, err = Decide(context.Background(), "issues.opened", "orionsbelt-dev/demos", fixture(t, "issues_opened.json"), h, testPolicy())
+	h := NewHaiku(testMenu(), option.WithBaseURL(srv.URL), option.WithAPIKey("x"), option.WithMaxRetries(0))
+	_, err = Decide(context.Background(), "issues.opened", "orionsbelt-dev/demos", fixture(t, "issues_opened.json"), h, testMenu())
 	if err == nil {
 		t.Fatalf("status %d: Decide returned no error", status)
 	}

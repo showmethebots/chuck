@@ -14,9 +14,11 @@ type Verdict struct {
 	Stage      string
 	Outcome    string
 	Category   string
-	WouldDo    string
+	Task       string // a dispatch task, or None
+	WouldDo    string // an ask_first action, or None
 	Permission config.Permission
 	Target     string
+	Ask        string
 	Confidence float64
 	Rationale  string
 	RawOutput  string
@@ -27,7 +29,7 @@ type Verdict struct {
 // Decide runs rules, then the classifier, then validation. It returns an
 // error only when the classifier call itself failed, which is worth
 // retrying; every other failure is a triage_failed verdict.
-func Decide(ctx context.Context, kind, repo string, payload []byte, c Classifier, p config.Policy) (Verdict, error) {
+func Decide(ctx context.Context, kind, repo string, payload []byte, c Classifier, m Menu) (Verdict, error) {
 	if name, ok := MatchRule(kind); ok {
 		return Verdict{Stage: memory.StageRule, Outcome: memory.OutcomeDropped, Rationale: name}, nil
 	}
@@ -48,13 +50,13 @@ func Decide(ctx context.Context, kind, repo string, payload []byte, c Classifier
 		return v, nil
 	}
 	v.CostUSD = cost
-	r, perm, err := ParseResult(raw, p)
+	r, perm, err := ParseResult(raw, m)
 	if err != nil {
 		v.Outcome, v.Rationale = memory.OutcomeFailed, "output: "+err.Error()
 		return v, nil
 	}
 	v.Outcome = memory.OutcomeOK
-	v.Category, v.WouldDo, v.Permission = r.Category, r.WouldDo, perm
-	v.Target, v.Confidence, v.Rationale = r.Target, r.Confidence, r.Rationale
+	v.Category, v.Task, v.WouldDo, v.Permission = r.Category, r.Task, r.WouldDo, perm
+	v.Target, v.Ask, v.Confidence, v.Rationale = r.Target, r.Ask, r.Confidence, r.Rationale
 	return v, nil
 }
