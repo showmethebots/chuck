@@ -199,10 +199,11 @@ Expect a burst on the first connection. Every decision queued since triage
 went live (section 2) posts now: grade posts in `#chuck-shadow` and approval
 requests in `#chuck`, about 20 every 5 seconds until the backlog clears.
 `fly logs` may show Slack rate-limit warnings while it drains; posts that hit
-one are retried, not lost. These are real decisions: grade them, and they
-count toward the 100-graded target, as long as they're graded after the exit
-window's current start (see section 5). Old approval requests can be
-answered or ignored.
+one are retried, not lost. These are real decisions: grade them. Whether a
+grade counts toward the 100-graded target depends on when the *decision*
+was made, not when it's graded (see section 5) — a decision made before the
+exit window's current start never counts, no matter when you grade it. Old
+approval requests can be answered or ignored.
 
 ### 3.6 Second Slack account
 
