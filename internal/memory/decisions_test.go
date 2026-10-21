@@ -28,6 +28,16 @@ func recordDecision(t *testing.T, s *Store, d Decision) int64 {
 	return id
 }
 
+// markPreChange marks id as decided under the old (pre-dispatch) triage
+// vocabulary, the way existing rows were left by the 0003_dispatch.sql
+// migration.
+func markPreChange(t *testing.T, s *Store, id int64) {
+	t.Helper()
+	if _, err := s.db.Exec(`UPDATE decisions SET triage_version = 1 WHERE id = ?`, id); err != nil {
+		t.Fatalf("markPreChange: %v", err)
+	}
+}
+
 func TestRecordDecisionTriagesEvent(t *testing.T) {
 	ctx := context.Background()
 	s := openTemp(t, filepath.Join(t.TempDir(), "state.db"))
@@ -56,6 +66,58 @@ func TestRecordDecisionTriagesEvent(t *testing.T) {
 	byEvent, err := s.DecisionForEvent(ctx, ev)
 	if err != nil || byEvent.ID != id {
 		t.Fatalf("DecisionForEvent = %+v, %v", byEvent, err)
+	}
+}
+
+func TestRecordDecisionStoresTaskAndAsk(t *testing.T) {
+	ctx := context.Background()
+	s := openTemp(t, filepath.Join(t.TempDir(), "state.db"))
+	defer func() { _ = s.Close() }()
+
+	ev := insertEvent(t, s, Event{DeliveryID: "a", ReceivedAt: t0})
+	id := recordDecision(t, s, Decision{
+		EventID: ev, Task: "address_review", Ask: "reviewer says the backoff never resets",
+		WouldDo: "none", PostKind: PostGrade,
+	})
+
+	v, err := s.DecisionView(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v.Task != "address_review" || v.Ask != "reviewer says the backoff never resets" {
+		t.Errorf("view = %+v", v)
+	}
+}
+
+func TestMigrationMarksExistingDecisionsAsPreChange(t *testing.T) {
+	ctx := context.Background()
+	s := openTemp(t, filepath.Join(t.TempDir(), "state.db"))
+	defer func() { _ = s.Close() }()
+
+	ev := insertEvent(t, s, Event{DeliveryID: "a", ReceivedAt: t0})
+	res, err := s.db.ExecContext(ctx, `INSERT INTO decisions (event_id, stage, outcome, created_at)
+		VALUES (?, ?, ?, ?)`, ev, StageHaiku, OutcomeOK, ts(t0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	preChangeID, err := res.LastInsertId()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var version int
+	if err := s.db.QueryRowContext(ctx, `SELECT triage_version FROM decisions WHERE id = ?`, preChangeID).Scan(&version); err != nil {
+		t.Fatal(err)
+	}
+	if version != 1 {
+		t.Errorf("triage_version of pre-existing row = %d, want 1", version)
+	}
+
+	id := recordDecision(t, s, Decision{EventID: insertEvent(t, s, Event{DeliveryID: "b"})})
+	if err := s.db.QueryRowContext(ctx, `SELECT triage_version FROM decisions WHERE id = ?`, id).Scan(&version); err != nil {
+		t.Fatal(err)
+	}
+	if version != TriageVersion {
+		t.Errorf("triage_version of new row = %d, want %d", version, TriageVersion)
 	}
 }
 
@@ -152,6 +214,7 @@ func TestSampleQuietPicksOnlyUnpostedQuietDecisionsInWindow(t *testing.T) {
 	in("c", Decision{WouldDo: "comment_issue", PostKind: PostGrade})       // already posted kind
 	in("d", Decision{Outcome: OutcomeFailed})                              // failures are counted, not sampled
 	in("e", Decision{WouldDo: "none", CreatedAt: t0.Add(-48 * time.Hour)}) // outside window
+	in("f", Decision{WouldDo: "none", Task: "fix_ci"})                     // dispatched a task, not actually quiet
 
 	ids, err := s.SampleQuiet(ctx, t0.Add(-time.Hour), t0.Add(time.Hour), 10)
 	if err != nil {

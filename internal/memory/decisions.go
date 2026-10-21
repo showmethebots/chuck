@@ -19,6 +19,10 @@ const (
 	PostApproval = "approval"
 )
 
+// TriageVersion marks decisions made under the current triage vocabulary.
+// Version 1 is everything before 0003_dispatch.sql (policy actions only).
+const TriageVersion = 2
+
 // Decision is one triage result: what chuck would have done about an event.
 type Decision struct {
 	ID           int64
@@ -31,6 +35,8 @@ type Decision struct {
 	Target       string
 	Confidence   float64
 	Rationale    string // model's reason, rule name, or failure reason
+	Task         string // a dispatch task, "none", or "" (rule/failed/pre-change)
+	Ask          string
 	RawOutput    string
 	Model        string
 	InputTokens  int64
@@ -67,10 +73,10 @@ func (s *Store) RecordDecision(ctx context.Context, d Decision) (int64, error) {
 	at := ts(d.CreatedAt)
 	res, err := tx.ExecContext(ctx, `INSERT INTO decisions
 		(event_id, stage, outcome, category, would_do, permission, target, confidence, rationale,
-		 raw_output, model, input_tokens, output_tokens, cost_usd, post_kind, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 task, ask, raw_output, model, input_tokens, output_tokens, cost_usd, post_kind, triage_version, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		d.EventID, d.Stage, d.Outcome, d.Category, d.WouldDo, d.Permission, d.Target, d.Confidence, d.Rationale,
-		d.RawOutput, d.Model, d.InputTokens, d.OutputTokens, d.CostUSD, postKind, at)
+		d.Task, d.Ask, d.RawOutput, d.Model, d.InputTokens, d.OutputTokens, d.CostUSD, postKind, TriageVersion, at)
 	if err != nil {
 		return 0, err
 	}
@@ -106,7 +112,7 @@ func (s *Store) SpendSince(ctx context.Context, since time.Time) (float64, error
 // makes them read it as the text JSON it is. pull_request comes before issue
 // so review events link to the PR.
 const viewQuery = `SELECT d.id, d.event_id, d.stage, d.outcome, d.category, d.would_do, d.permission,
-	d.target, d.confidence, d.rationale, d.raw_output, d.model, d.input_tokens, d.output_tokens,
+	d.target, d.confidence, d.rationale, d.task, d.ask, d.raw_output, d.model, d.input_tokens, d.output_tokens,
 	d.cost_usd, COALESCE(d.post_kind, ''), COALESCE(d.slack_channel, ''), COALESCE(d.slack_ts, ''),
 	d.created_at, e.repo, e.kind,
 	COALESCE((SELECT g.grade FROM grades g WHERE g.decision_id = d.id ORDER BY g.id DESC LIMIT 1), ''),
@@ -121,7 +127,7 @@ func scanView(sc scanner) (DecisionView, error) {
 	var v DecisionView
 	var created string
 	err := sc.Scan(&v.ID, &v.EventID, &v.Stage, &v.Outcome, &v.Category, &v.WouldDo, &v.Permission,
-		&v.Target, &v.Confidence, &v.Rationale, &v.RawOutput, &v.Model, &v.InputTokens, &v.OutputTokens,
+		&v.Target, &v.Confidence, &v.Rationale, &v.Task, &v.Ask, &v.RawOutput, &v.Model, &v.InputTokens, &v.OutputTokens,
 		&v.CostUSD, &v.PostKind, &v.SlackChannel, &v.SlackTS,
 		&created, &v.Repo, &v.Kind, &v.Grade, &v.ApprovalResponse, &v.ApprovalBy, &v.URL)
 	if err != nil {
@@ -215,12 +221,12 @@ func (s *Store) QueueGradePosts(ctx context.Context, ids []int64) error {
 }
 
 // SampleQuiet picks up to n random decisions in [since, until) where chuck
-// would do nothing (dropped by a rule, or would_do "none") and that have no
-// post yet.
+// would do nothing (dropped by a rule, or would_do "none" with no task
+// dispatched) and that have no post yet.
 func (s *Store) SampleQuiet(ctx context.Context, since, until time.Time, n int) ([]int64, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT id FROM decisions
 		WHERE created_at >= ? AND created_at < ? AND post_kind IS NULL
-		  AND (outcome = ? OR (outcome = ? AND would_do = 'none'))
+		  AND (outcome = ? OR (outcome = ? AND would_do = 'none' AND task IN ('', 'none')))
 		ORDER BY random() LIMIT ?`, ts(since), ts(until), OutcomeDropped, OutcomeOK, n)
 	if err != nil {
 		return nil, err

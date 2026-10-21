@@ -12,7 +12,12 @@ func TestGradedEventsAndReadOnly(t *testing.T) {
 	s := openTemp(t, path)
 	graded := recordDecision(t, s, Decision{EventID: insertEvent(t, s, Event{DeliveryID: "a", Kind: "issues.opened", Payload: []byte(`{"x":1}`)}), RawOutput: "raw"})
 	recordDecision(t, s, Decision{EventID: insertEvent(t, s, Event{DeliveryID: "b"})}) // ungraded
+	preChangeGraded := recordDecision(t, s, Decision{EventID: insertEvent(t, s, Event{DeliveryID: "c"})})
+	markPreChange(t, s, preChangeGraded)
 	if err := s.RecordGrade(ctx, graded, "down", "UOWNER0001", t0); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RecordGrade(ctx, preChangeGraded, "down", "UOWNER0001", t0); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Close(); err != nil {
