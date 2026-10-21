@@ -131,7 +131,7 @@ func TestLoadIntegrationsSchedule(t *testing.T) {
 // Turning Slack on without an allowlist would leave chuck listening to
 // nobody, or worse; it must refuse before touching the database.
 func TestRunRefusesSlackWithoutAllowlist(t *testing.T) {
-	// The shipped config gains slack.yaml later, so copy only the other two.
+	// Copy only routes.yaml and policy.yaml so the allowlist is missing.
 	cfgDir := t.TempDir()
 	for _, name := range []string{"routes.yaml", "policy.yaml"} {
 		b, err := os.ReadFile(filepath.Join("..", "..", "config", name))
