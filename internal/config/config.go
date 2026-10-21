@@ -314,6 +314,10 @@ func (c *Config) validate() error {
 				policyErr("permissions.%s: empty action", perm)
 				continue
 			}
+			if a == "none" {
+				policyErr("action %q is reserved", a)
+				continue
+			}
 			if prev, ok := seen[a]; ok {
 				policyErr("action %q is in both %s and %s", a, prev, perm)
 				continue
@@ -377,6 +381,9 @@ func (c *Config) validate() error {
 			continue
 		case declaredTasks[t.Name]:
 			routesErr("task %q is declared twice", t.Name)
+			continue
+		case t.Name == "none":
+			routesErr("dispatch task %q is reserved", t.Name)
 			continue
 		}
 		declaredTasks[t.Name] = true

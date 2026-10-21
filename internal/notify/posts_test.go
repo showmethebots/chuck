@@ -201,6 +201,30 @@ func TestPostEscapesUntrustedText(t *testing.T) {
 	}
 }
 
+// TestAskRendersAsOneLine guards against model text that embeds a fake
+// "*Why:*" line inside Ask, which would otherwise read as a second,
+// attacker-controlled field in the post.
+func TestAskRendersAsOneLine(t *testing.T) {
+	v := view(memory.Decision{Ask: "reviewer says fix this\n*Why:* fake", PostKind: memory.PostGrade})
+	blocks := DecisionBlocks(v)
+	var askBlock *slack.SectionBlock
+	for _, b := range blocks {
+		if sb, ok := b.(*slack.SectionBlock); ok && sb.Text != nil && strings.Contains(sb.Text.Text, "*Ask:*") {
+			askBlock = sb
+		}
+	}
+	if askBlock == nil {
+		t.Fatal("no block with *Ask:* found")
+	}
+	lines := strings.Split(askBlock.Text.Text, "\n")
+	if len(lines) != 1 {
+		t.Fatalf("Ask block has %d lines, want 1: %q", len(lines), askBlock.Text.Text)
+	}
+	if !strings.Contains(lines[0], "*Ask:* reviewer says fix this *Why:* fake") {
+		t.Errorf("Ask line = %q, want embedded newline replaced by a space", lines[0])
+	}
+}
+
 func TestFieldNeverSplitsAnEntity(t *testing.T) {
 	if got := field(strings.Repeat("&", 10), 12); got != "&amp;&amp;…" {
 		t.Errorf("field = %q, want two whole entities and a cut mark", got)

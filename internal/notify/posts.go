@@ -111,7 +111,11 @@ func DecisionBlocks(v memory.DecisionView) []slack.Block {
 	if v.Outcome == memory.OutcomeOK {
 		var lines []string
 		if v.Ask != "" {
-			lines = append(lines, "*Ask:* "+field(v.Ask, maxRationale))
+			// Ask is one line in the spec. Collapse any \r or \n before
+			// escaping so model text can't fake a second field (e.g. a
+			// "*Why:*" line) inside it.
+			ask := strings.NewReplacer("\r", " ", "\n", " ").Replace(v.Ask)
+			lines = append(lines, "*Ask:* "+field(ask, maxRationale))
 		}
 		if v.Rationale != "" {
 			lines = append(lines, "*Why:* "+field(v.Rationale, maxRationale))

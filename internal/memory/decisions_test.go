@@ -215,6 +215,7 @@ func TestSampleQuietPicksOnlyUnpostedQuietDecisionsInWindow(t *testing.T) {
 	in("d", Decision{Outcome: OutcomeFailed})                              // failures are counted, not sampled
 	in("e", Decision{WouldDo: "none", CreatedAt: t0.Add(-48 * time.Hour)}) // outside window
 	in("f", Decision{WouldDo: "none", Task: "fix_ci"})                     // dispatched a task, not actually quiet
+	noneTask := in("g", Decision{WouldDo: "none", Task: "none"})           // post-change quiet: explicit task "none"
 
 	ids, err := s.SampleQuiet(ctx, t0.Add(-time.Hour), t0.Add(time.Hour), 10)
 	if err != nil {
@@ -224,11 +225,29 @@ func TestSampleQuietPicksOnlyUnpostedQuietDecisionsInWindow(t *testing.T) {
 	for _, id := range ids {
 		got[id] = true
 	}
-	if len(ids) != 2 || !got[none] || !got[dropped] {
-		t.Fatalf("SampleQuiet = %v, want {%d, %d}", ids, none, dropped)
+	if len(ids) != 3 || !got[none] || !got[dropped] || !got[noneTask] {
+		t.Fatalf("SampleQuiet = %v, want {%d, %d, %d}", ids, none, dropped, noneTask)
 	}
 	if ids, _ := s.SampleQuiet(ctx, t0.Add(-time.Hour), t0.Add(time.Hour), 1); len(ids) != 1 {
 		t.Fatalf("limit not applied: %v", ids)
+	}
+}
+
+func TestSampleQuietExcludesPreChangeDecisions(t *testing.T) {
+	ctx := context.Background()
+	s := openTemp(t, filepath.Join(t.TempDir(), "state.db"))
+	defer func() { _ = s.Close() }()
+
+	ev := insertEvent(t, s, Event{DeliveryID: "a"})
+	preChange := recordDecision(t, s, Decision{EventID: ev, WouldDo: "none"})
+	markPreChange(t, s, preChange)
+
+	ids, err := s.SampleQuiet(ctx, t0.Add(-time.Hour), t0.Add(time.Hour), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ids) != 0 {
+		t.Fatalf("SampleQuiet = %v, want none (pre-change decision's grade can never count)", ids)
 	}
 }
 

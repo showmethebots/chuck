@@ -157,6 +157,8 @@ func TestLoadRejectsInvalid(t *testing.T) {
 		{name: "dispatch task named like an action", routes: "name: fix_ci|name: merge", wantErr: `dispatch task "merge" is also a policy.yaml action`},
 		{name: "dispatch task without description", routes: "description: A CI run failed or timed out.|description: \"\"", wantErr: "tasks.dispatch[0]: description is required"},
 		{name: "undeclared route task", routes: "{task: triage}|{task: digset}", wantErr: `task "digset" is not declared in tasks`},
+		{name: "dispatch task named none", routes: "name: fix_ci|name: none", wantErr: `dispatch task "none" is reserved`},
+		{name: "policy action named none", policy: "act_freely: [read, triage]|act_freely: [read, triage, none]", wantErr: `action "none" is reserved`},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

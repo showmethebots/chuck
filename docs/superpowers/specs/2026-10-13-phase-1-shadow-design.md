@@ -226,6 +226,10 @@ would-do and its permission tier from `policy.yaml`, confidence, rationale,
 and 👍/👎 buttons. Owner only. Regrading is allowed; the latest grade counts.
 The post is updated to show the current grade.
 
+Superseded by 2026-10-20-triage-dispatch-design.md: posts now lead with the
+dispatched task (or the ask_first action) plus Ask/Why lines, not the
+would-do/permission-tier line described above.
+
 **Updated 2026-10-20:** every decision whose `task` is not `none` gets a
 grade post; a decision whose `would_do` is in `ask_first` gets an approval
 post (below) instead, not a grade post. Others get a grade post only when

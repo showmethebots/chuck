@@ -227,11 +227,13 @@ the second account. Report anything that differs in the chuck session.
 ## 5. The shadow week
 
 The week starts once the checklist passes. The exit window restarts
-whenever a change to triage's output deploys; the first restart was the
+whenever a change bumps `triage_version`; the first restart was the
 2026-10-20 triage-dispatch change (`triage_version` 2), so counts only
-include decisions made after that deploy. The daily summary's "Exit
-progress" line and `chuck replay`'s default selection apply the same
-filter.
+include decisions made after that deploy. Tuning the prompt alone, without
+bumping `triage_version`, does not restart the window — the exit criterion
+expects the prompt to be tuned during the week on a single running count.
+The daily summary's "Exit progress" line and `chuck replay`'s default
+selection apply the same filter.
 
 - **Daily:** grade the posts in `#chuck-shadow` and answer approvals in
   `#chuck`. Grade what chuck would do, not whether the event mattered: 👍

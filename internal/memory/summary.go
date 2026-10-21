@@ -5,8 +5,9 @@ import (
 	"time"
 )
 
-// Summary is the daily report: activity in [Since, Until), plus all-time
-// grade totals that track the Phase 1 exit criterion.
+// Summary is the daily report: activity in [Since, Until), plus
+// current-triage-version grade totals that track the Phase 1 exit
+// criterion.
 type Summary struct {
 	Since, Until   time.Time
 	Outcomes       map[string]int // decisions by outcome, in window

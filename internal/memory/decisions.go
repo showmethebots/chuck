@@ -222,12 +222,15 @@ func (s *Store) QueueGradePosts(ctx context.Context, ids []int64) error {
 
 // SampleQuiet picks up to n random decisions in [since, until) where chuck
 // would do nothing (dropped by a rule, or would_do "none" with no task
-// dispatched) and that have no post yet.
+// dispatched), that have no post yet, and that were decided under the
+// current triage_version. Pre-change decisions are excluded even if they
+// fall in the window: their grade can never count toward the current exit
+// window, so sampling them would just waste a grading slot.
 func (s *Store) SampleQuiet(ctx context.Context, since, until time.Time, n int) ([]int64, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT id FROM decisions
-		WHERE created_at >= ? AND created_at < ? AND post_kind IS NULL
+		WHERE created_at >= ? AND created_at < ? AND post_kind IS NULL AND triage_version = ?
 		  AND (outcome = ? OR (outcome = ? AND would_do = 'none' AND task IN ('', 'none')))
-		ORDER BY random() LIMIT ?`, ts(since), ts(until), OutcomeDropped, OutcomeOK, n)
+		ORDER BY random() LIMIT ?`, ts(since), ts(until), TriageVersion, OutcomeDropped, OutcomeOK, n)
 	if err != nil {
 		return nil, err
 	}
