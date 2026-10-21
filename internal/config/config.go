@@ -104,6 +104,19 @@ type Routes struct {
 	Routes               []Route `yaml:"routes"`
 	Default              Tier    `yaml:"default"`
 	PromoteAfterFailures int     `yaml:"promote_after_failures"`
+	Tasks                Tasks   `yaml:"tasks"`
+}
+
+// Tasks are the tasks routes may name.
+type Tasks struct {
+	Dispatch []Task   `yaml:"dispatch"` // tasks triage may hand to a worker, in prompt order
+	Internal []string `yaml:"internal"` // tasks chuck schedules itself; never proposed by triage
+}
+
+// Task is work triage may hand to a worker.
+type Task struct {
+	Name        string `yaml:"name"`
+	Description string `yaml:"description"` // one line, shown to the triage model
 }
 
 // Route sends work matching Match to Tier. First match wins.
@@ -353,6 +366,39 @@ func (c *Config) validate() error {
 	if c.Routes.PromoteAfterFailures < 1 {
 		routesErr("promote_after_failures must be >= 1")
 	}
+
+	// The routes.yaml tasks section, checked before routes so route task
+	// references can be validated against the declared set.
+	declaredTasks := map[string]bool{}
+	for i, t := range c.Routes.Tasks.Dispatch {
+		switch {
+		case t.Name == "":
+			routesErr("tasks.dispatch[%d]: empty name", i)
+			continue
+		case declaredTasks[t.Name]:
+			routesErr("task %q is declared twice", t.Name)
+			continue
+		}
+		declaredTasks[t.Name] = true
+		if _, isAction := seen[t.Name]; isAction {
+			routesErr("dispatch task %q is also a policy.yaml action", t.Name)
+		}
+		if t.Description == "" {
+			routesErr("tasks.dispatch[%d]: description is required", i)
+		}
+	}
+	for i, name := range c.Routes.Tasks.Internal {
+		switch {
+		case name == "":
+			routesErr("tasks.internal[%d]: empty name", i)
+			continue
+		case declaredTasks[name]:
+			routesErr("task %q is declared twice", name)
+			continue
+		}
+		declaredTasks[name] = true
+	}
+
 	for i := range c.Routes.Routes {
 		r := &c.Routes.Routes[i]
 		at := fmt.Sprintf("routes[%d]", i)
@@ -382,6 +428,11 @@ func (c *Config) validate() error {
 				if v == "" {
 					routesErr("%s: match.%s has an empty value", at, kv.key)
 				}
+			}
+		}
+		for _, tname := range m.Task {
+			if tname != "" && !declaredTasks[tname] {
+				routesErr("%s: task %q is not declared in tasks", at, tname)
 			}
 		}
 		for _, a := range m.Action {

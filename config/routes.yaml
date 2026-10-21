@@ -4,7 +4,7 @@
 # match keys (all optional, but at least one of event, task, or action is
 # required; all given keys must match):
 #   event:    string or list (any of)
-#   task:     string or list (any of)
+#   task:     string or list (any of); each must be declared under tasks
 #   action:   string or list (any of); each must be declared in policy.yaml
 #   attempts: comparison against the task's failure count: <N, <=N, >N, >=N, ==N
 # tier: haiku | sonnet | opus | human
@@ -28,3 +28,19 @@ default: haiku_classify
 
 # Promote one tier after this many failures. Escalation is one-way per task.
 promote_after_failures: 2
+
+# Tasks routes can match. dispatch: work triage may hand to a worker; the
+# description is what the triage prompt shows. internal: work chuck
+# schedules itself, never proposed by triage. A dispatch task may not share
+# a name with a policy.yaml action.
+tasks:
+  dispatch:
+    - name: address_review
+      description: Review feedback asking for a change or raising a problem. The worker reads the code and decides whether to reply or fix.
+    - name: fix_ci
+      description: A CI run failed or timed out.
+    - name: implement_issue
+      description: An issue asks for something actionable.
+    - name: review_pr
+      description: A PR is ready for a first-pass review.
+  internal: [plan_goal, triage, digest, notion_sync]

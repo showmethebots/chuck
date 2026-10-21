@@ -25,6 +25,9 @@ conventions the code already depends on.
   Validation must keep collecting errors rather than stopping at the first.
 - **Every action a route names is declared in `policy.yaml`, in exactly one
   permission tier.**
+- **Every task a route names is declared under `tasks` in `routes.yaml`.**
+  Dispatch tasks are what triage may hand to a worker and may not share a
+  name with a `policy.yaml` action.
 - **Every model tier has a daily budget.** There is no "unlimited".
 - **Shipped migrations are immutable.** To change the schema, add a new file
   under `internal/memory/migrations/`. Never edit one that has shipped.
