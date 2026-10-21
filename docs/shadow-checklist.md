@@ -40,10 +40,12 @@ see; anything else is a failure to report in the chuck session.
 8. **Grade post arrives.** Open an issue on `demos` that clearly asks for
    something actionable (for example, a bug report with steps to reproduce
    and a request for a fix). See: a post in `#chuck-shadow` within a minute
-   or two. If no post appears, check
+   or two, headed "chuck would hand this to a worker: `implement_issue`"
+   with an *Ask:* line. If no post appears, check
    `fly logs -c deploy/fly.toml | grep '"msg":"decision"'` — a decision
-   with `"would_do":"none"` is correct behavior (it only surfaces in the
-   daily sample), not a failure.
+   with `"task":"none"` on an actionable issue like this is a triage miss
+   to report, not correct behavior: it only resurfaces for grading if the
+   daily sample happens to pick it, and should be graded 👎 when it does.
 
 Afterwards, remove the second account from `members:` only if you do not
 want it to keep member powers; it is harmless to leave.

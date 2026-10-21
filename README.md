@@ -39,7 +39,10 @@ every problem is reported at once. Cross-file rules:
 
 - every action a route names must be declared in `policy.yaml` permissions;
 - each action belongs to exactly one permission tier;
-- any route matching an `ask_first` action must route to `human`.
+- any route matching an `ask_first` action must route to `human`;
+- every task a route names must be declared under `tasks` in `routes.yaml`;
+  a dispatch task's name may not also be a `policy.yaml` action, and its
+  description is required.
 - `slack.yaml` is optional until Slack is on; it needs exactly one owner,
   every ID must look like a Slack user ID, and the owner is not also a
   member.

@@ -32,12 +32,12 @@ dataset that Phase 2's router is tested against.
 | Decision | Choice | Why |
 |---|---|---|
 | Event pipeline | SQLite-backed queue: webhook stores raw event and returns 202; an in-daemon loop triages | GitHub's 10 s delivery timeout; `pause` needs something to hold back; restarts lose nothing; replay is the same loop |
-| Triage output | Structured JSON validated in code | Replay and Phase 2 need comparable fields; grades attach to a specific claim |
+| Triage output | Structured JSON validated in code | Replay and Phase 2 need comparable fields; grades attach to a specific claim. Amended 2026-10-20: triage proposes a worker task or an `ask_first` action, see `2026-10-20-triage-dispatch-design.md` |
 | GitHub source | Read-only GitHub Apps, not repo/org webhooks: one private App owned by `orionsbelt-dev`, one owned by `cwinters8`, same webhook URL and secret | Personal accounts have no account-level webhook; a private App installs only on its owner, and a public one could be installed by anyone to feed chuck events; Phase 3 needs Apps for scoped tokens anyway |
 | Sources | App installed on all of `orionsbelt-dev`, plus `cwinters8/agent-ci-kit`, `cwinters8/agent-skills`, `cwinters8/content-workshop` | Measured activity, below |
 | Shadow scope | Every repo in the App installation is treated as handed off, for would-have-done purposes only | Nothing is handed off yet; harmless because nothing executes |
 | Approvals | `ask_first` would-dos post real approval requests; answers are logged; nothing executes | Exercises the whole approval round-trip at zero risk |
-| Grading | Owner-only 👍/👎 on every would-act decision plus a daily random sample of would-do-nothing decisions | Defines "correct"; keeps grading to roughly 10–20 a day |
+| Grading | Owner-only 👍/👎 on every would-act decision plus a daily random sample of would-do-nothing decisions | Defines "correct"; keeps grading to roughly 10–20 a day. Amended 2026-10-20: a task decision gets a grade post, an `ask_first` action gets an approval post, see `2026-10-20-triage-dispatch-design.md` |
 | Noise rules | In Go, table-tested | Phase 2's router is where rules move to YAML; designing the format now would mean doing it twice |
 | Dev/test repo | `orionsbelt-dev/demos` | It is the Phase 3 pilot; near-zero natural traffic, so test traffic there is deliberate |
 | Migrations | New `0002_shadow.sql`; `0001_boots.sql` stays as shipped | The runner tracks migrations by filename, so an edited 0001 never re-runs on production and schemas would silently diverge |
@@ -175,7 +175,10 @@ comments read as `User`, as before. The longer-term fix is a separate GitHub
 identity for agents, decided in Phase 3 alongside chuck's own write
 identity.
 
-`Result` fields:
+`Result` fields (**amended 2026-10-20**: gained `task` and `ask`, and
+`would_do` no longer covers every proposable action — see "Triage output"
+above and `2026-10-20-triage-dispatch-design.md` for the current shape and
+validation):
 
 | Field | Type | Values |
 |---|---|---|
@@ -461,6 +464,12 @@ measurable terms. All must hold:
    versions.
 
 The daily summary reports progress on 2–4.
+
+**Amended 2026-10-20:** the exit window restarted when the triage-dispatch
+change (`2026-10-20-triage-dispatch-design.md`) deployed. All counts above
+cover decisions with `triage_version` 2 only; the daily summary's "Exit
+progress" line and `chuck replay`'s default selection apply the same filter.
+Older decisions and grades stay in the database untouched.
 
 ## Risks
 
