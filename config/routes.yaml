@@ -32,7 +32,7 @@ promote_after_failures: 2
 # Tasks routes can match. dispatch: work triage may hand to a worker; the
 # description is what the triage prompt shows. internal: work chuck
 # schedules itself, never proposed by triage. A dispatch task may not share
-# a name with a policy.yaml action.
+# a name with a policy.yaml action, and "none" is reserved.
 tasks:
   dispatch:
     - name: address_review
