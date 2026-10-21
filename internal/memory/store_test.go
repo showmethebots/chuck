@@ -66,3 +66,30 @@ func TestMigrateIsIdempotent(t *testing.T) {
 		t.Fatalf("schema_migrations rows = %d, want %d", n, len(migrations))
 	}
 }
+
+// The deploy notice compares this boot's version with the one before it, so
+// a restart of the same build stays quiet.
+func TestPreviousBootVersion(t *testing.T) {
+	ctx := context.Background()
+	s := openTemp(t, filepath.Join(t.TempDir(), "state.db"))
+	defer func() { _ = s.Close() }()
+
+	steps := []struct{ boot, want string }{
+		{"v1", ""}, // first boot ever: nothing before it
+		{"v1", "v1"},
+		{"v2", "v1"},
+		{"v1", "v2"}, // rollback
+	}
+	for i, st := range steps {
+		if _, err := s.RecordBoot(ctx, st.boot); err != nil {
+			t.Fatalf("RecordBoot: %v", err)
+		}
+		got, err := s.PreviousBootVersion(ctx)
+		if err != nil {
+			t.Fatalf("PreviousBootVersion: %v", err)
+		}
+		if got != st.want {
+			t.Errorf("boot %d (%s): PreviousBootVersion = %q, want %q", i+1, st.boot, got, st.want)
+		}
+	}
+}

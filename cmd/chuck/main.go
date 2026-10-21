@@ -136,6 +136,10 @@ func runDaemon(ctx context.Context, log *slog.Logger, getenv func(string) string
 	if err != nil {
 		return fmt.Errorf("record boot: %w", err)
 	}
+	prevVersion, err := store.PreviousBootVersion(ctx)
+	if err != nil {
+		return fmt.Errorf("previous boot: %w", err)
+	}
 
 	ln, err := net.Listen("tcp", ":"+envOr(getenv, "PORT", "8080"))
 	if err != nil {
@@ -195,6 +199,7 @@ func runDaemon(ctx context.Context, log *slog.Logger, getenv func(string) string
 		d.Background = append(d.Background,
 			func(ctx context.Context) { ob.Run(ctx, 5*time.Second) },
 			func(ctx context.Context) { sc.Run(ctx, ix) },
+			func(ctx context.Context) { ix.AnnounceDeploy(ctx, prevVersion, 5*time.Second) },
 		)
 	}
 	d.Background = append(d.Background, func(ctx context.Context) {
