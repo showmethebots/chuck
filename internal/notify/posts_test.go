@@ -43,10 +43,11 @@ func view(d memory.Decision) memory.DecisionView {
 
 func TestApprovalPostOpen(t *testing.T) {
 	v := view(memory.Decision{WouldDo: "merge", Permission: "ask_first", Target: "https://github.com/orionsbelt-dev/demos/pull/8",
-		Category: "pr_lifecycle", Confidence: 0.8, Rationale: "approved and green", PostKind: memory.PostApproval})
+		Category: "pr_lifecycle", Confidence: 0.8, Rationale: "approved and green", Ask: "approved and CI green", PostKind: memory.PostApproval})
 	got := render(t, v)
 	for _, want := range []string{
 		"SHADOW — nothing will execute", "`merge`", "pull/8", "approved and green", "orionsbelt-dev/demos",
+		"*Ask:* approved and CI green", "*Why:* approved and green",
 		`"action_id":"approve"`, `"action_id":"deny"`, `"action_id":"grade_up"`, `"action_id":"grade_down"`, `"value":"42"`,
 	} {
 		if !strings.Contains(got, want) {
@@ -55,6 +56,39 @@ func TestApprovalPostOpen(t *testing.T) {
 	}
 	if !strings.Contains(DecisionText(v), "SHADOW") {
 		t.Errorf("fallback text = %q", DecisionText(v))
+	}
+}
+
+func TestTaskPostLeadsWithTaskAndAsk(t *testing.T) {
+	v := view(memory.Decision{Task: "address_review", WouldDo: "none", Target: "https://github.com/orionsbelt-dev/demos/pull/1",
+		Ask: "reviewer says the backoff never resets", Rationale: "concrete bug with a suggested fix", PostKind: memory.PostGrade})
+	got := render(t, v)
+	for _, want := range []string{
+		"chuck would hand this to a worker: `address_review`", "pull/1",
+		"*Ask:* reviewer says the backoff never resets", "*Why:* concrete bug with a suggested fix",
+		`"action_id":"grade_up"`, `"action_id":"grade_down"`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("blocks lack %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "SHADOW") {
+		t.Errorf("task post shows SHADOW banner:\n%s", got)
+	}
+	if !strings.Contains(DecisionText(v), "hand this to a worker") {
+		t.Errorf("fallback text = %q", DecisionText(v))
+	}
+}
+
+func TestPreChangeGradePostStillRenders(t *testing.T) {
+	v := view(memory.Decision{Task: "", WouldDo: "comment_issue", Permission: "act_freely", PostKind: memory.PostGrade})
+	v.Grade = "up"
+	got := render(t, v)
+	if !strings.Contains(got, "chuck would `comment_issue`") {
+		t.Errorf("pre-change post lost its old headline:\n%s", got)
+	}
+	if !strings.Contains(got, "Graded 👍") {
+		t.Errorf("pre-change post lost its grade:\n%s", got)
 	}
 }
 
@@ -87,9 +121,12 @@ func TestQuietPosts(t *testing.T) {
 	if !strings.Contains(dropped, "Dropped by rule `github_app_housekeeping`") {
 		t.Errorf("dropped:\n%s", dropped)
 	}
-	none := render(t, view(memory.Decision{WouldDo: "none", Category: "noise", PostKind: memory.PostGrade}))
+	none := render(t, view(memory.Decision{Task: "none", WouldDo: "none", Category: "noise", PostKind: memory.PostGrade}))
 	if !strings.Contains(none, "chuck would do nothing") {
 		t.Errorf("none:\n%s", none)
+	}
+	if strings.Contains(none, "*Ask:*") {
+		t.Errorf("quiet post with no ask shows an Ask line:\n%s", none)
 	}
 }
 
@@ -116,7 +153,7 @@ func TestQuietPostsLinkToEvent(t *testing.T) {
 func TestPostBoundsLongFields(t *testing.T) {
 	long := strings.Repeat("é", 5000)
 	v := view(memory.Decision{WouldDo: "comment_issue", Permission: "act_freely", Target: "https://github.com/o/r/issues/7?" + long,
-		Category: "new_issue", Confidence: 0.8, Rationale: long, PostKind: memory.PostApproval})
+		Category: "new_issue", Confidence: 0.8, Rationale: long, Ask: long, PostKind: memory.PostApproval})
 	v.URL = "https://github.com/o/r/issues/7#" + long
 	for _, b := range DecisionBlocks(v) {
 		switch b := b.(type) {
@@ -149,7 +186,8 @@ func TestPostEscapesUntrustedText(t *testing.T) {
 	const evil = "https://evil.example|github.com/orionsbelt-dev/chuck/pull/1"
 	v := view(memory.Decision{WouldDo: "comment_issue", Permission: "act_freely",
 		Target: "https://github.com/o/r/issues/7 <" + evil + ">", Category: "new_issue",
-		Rationale: "urgent <!channel> <!here> & <" + evil + ">", PostKind: memory.PostApproval})
+		Rationale: "urgent <!channel> <!here> & <" + evil + ">",
+		Ask:       "urgent <!channel> <!here> & <" + evil + ">", PostKind: memory.PostApproval})
 	v.URL = "https://github.com/o/r/issues/7><!channel"
 	for name, got := range map[string]string{"blocks": render(t, v), "text": DecisionText(v)} {
 		for _, bad := range []string{"<!channel>", "<!here>", "<" + evil + ">", "><!channel"} {

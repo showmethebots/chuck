@@ -60,6 +60,8 @@ func headline(v memory.DecisionView) string {
 		return fmt.Sprintf("Dropped by rule `%s`", field(v.Rationale, maxRationale))
 	case v.Outcome == memory.OutcomeFailed:
 		return "Triage failed"
+	case v.Task != "" && v.Task != "none":
+		return fmt.Sprintf("chuck would hand this to a worker: `%s` %s", v.Task, field(v.Target, maxRef))
 	case v.WouldDo == "" || v.WouldDo == "none":
 		return "chuck would do nothing"
 	default:
@@ -106,8 +108,17 @@ func DecisionBlocks(v memory.DecisionView) []slack.Block {
 		slack.NewSectionBlock(md(head), nil, nil),
 		slack.NewContextBlock("", md(about)),
 	}
-	if v.Outcome == memory.OutcomeOK && v.Rationale != "" {
-		blocks = append(blocks, slack.NewSectionBlock(md("> "+field(v.Rationale, maxRationale)), nil, nil))
+	if v.Outcome == memory.OutcomeOK {
+		var lines []string
+		if v.Ask != "" {
+			lines = append(lines, "*Ask:* "+field(v.Ask, maxRationale))
+		}
+		if v.Rationale != "" {
+			lines = append(lines, "*Why:* "+field(v.Rationale, maxRationale))
+		}
+		if len(lines) > 0 {
+			blocks = append(blocks, slack.NewSectionBlock(md(strings.Join(lines, "\n")), nil, nil))
+		}
 	}
 
 	var status []string
