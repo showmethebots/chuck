@@ -115,6 +115,12 @@ jobs, both daily at `CHUCK_DAILY_AT` (UTC `HH:MM`, default `13:00`):
 - **Grade sample:** pick `CHUCK_GRADE_SAMPLE` (default 5) random decisions
   from the previous 24 hours whose outcome is `dropped_by_rule` or whose
   `would_do` is `none`, and queue grade posts for them.
+  **Amended 2026-10-21:** rule drops get at most one of those slots, and
+  only when the sample is 2 or more; the rest go to Haiku's do-nothing
+  decisions, and a day with too few of those is not filled up with rule
+  drops. A rule's verdict depends only on the event kind, and in the first
+  three days rule drops were a third of the quiet pool and took 2 of 10
+  sampled slots.
 - **Shadow summary:** post to #chuck: decisions by category and outcome,
   grades given and pending, running 👍 rate, Haiku spend against budget,
   triage failures, whether chuck is paused.

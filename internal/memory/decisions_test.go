@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -230,6 +231,63 @@ func TestSampleQuietPicksOnlyUnpostedQuietDecisionsInWindow(t *testing.T) {
 	}
 	if ids, _ := s.SampleQuiet(ctx, t0.Add(-time.Hour), t0.Add(time.Hour), 1); len(ids) != 1 {
 		t.Fatalf("limit not applied: %v", ids)
+	}
+}
+
+func TestSampleQuietGivesRuleDropsAtMostOneSlot(t *testing.T) {
+	ctx := context.Background()
+	s := openTemp(t, filepath.Join(t.TempDir(), "state.db"))
+	defer func() { _ = s.Close() }()
+
+	n := 0
+	in := func(d Decision) int64 {
+		n++
+		d.EventID = insertEvent(t, s, Event{DeliveryID: fmt.Sprint(n)})
+		return recordDecision(t, s, d)
+	}
+	rule, haiku := map[int64]bool{}, map[int64]bool{}
+	for range 3 {
+		rule[in(Decision{Stage: StageRule, Outcome: OutcomeDropped, Rationale: "ping"})] = true
+	}
+	sample := func(n int) (rules, haikus int) {
+		t.Helper()
+		ids, err := s.SampleQuiet(ctx, t0.Add(-time.Hour), t0.Add(time.Hour), n)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, id := range ids {
+			switch {
+			case rule[id]:
+				rules++
+			case haiku[id]:
+				haikus++
+			default:
+				t.Fatalf("SampleQuiet returned unknown id %d", id)
+			}
+		}
+		return rules, haikus
+	}
+
+	// No Haiku decisions to grade: the rule slot is not backfilled.
+	if r, h := sample(5); r != 1 || h != 0 {
+		t.Fatalf("only rule drops, n=5: got %d rule + %d haiku, want 1 + 0", r, h)
+	}
+
+	for range 3 {
+		haiku[in(Decision{WouldDo: "none", Task: "none"})] = true
+	}
+	if r, h := sample(2); r != 1 || h != 1 {
+		t.Fatalf("n=2: got %d rule + %d haiku, want 1 + 1", r, h)
+	}
+	if r, h := sample(5); r != 1 || h != 3 {
+		t.Fatalf("n=5: got %d rule + %d haiku, want 1 + 3", r, h)
+	}
+	// A single slot goes to Haiku, whose decisions can be wrong.
+	if r, h := sample(1); r != 0 || h != 1 {
+		t.Fatalf("n=1: got %d rule + %d haiku, want 0 + 1", r, h)
+	}
+	if r, h := sample(0); r != 0 || h != 0 {
+		t.Fatalf("n=0: got %d rule + %d haiku, want none", r, h)
 	}
 }
 

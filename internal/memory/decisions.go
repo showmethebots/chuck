@@ -226,11 +226,42 @@ func (s *Store) QueueGradePosts(ctx context.Context, ids []int64) error {
 // current triage_version. Pre-change decisions are excluded even if they
 // fall in the window: their grade can never count toward the current exit
 // window, so sampling them would just waste a grading slot.
+//
+// Rule drops get at most one slot, and only when n is at least 2; the rest
+// go to Haiku. A rule's verdict depends only on the event kind, so grading
+// one a day keeps the rules gradeable, while more would spend slots on
+// decisions that cannot vary and pad the exit count with easy 👍s. Haiku's
+// "none" is where misses hide, and they arrive at high confidence, so
+// confidence is no help in finding them. A day with too few Haiku decisions
+// is not filled up with rule drops.
 func (s *Store) SampleQuiet(ctx context.Context, since, until time.Time, n int) ([]int64, error) {
+	var ids []int64
+	if n >= 2 {
+		rule, err := s.sample(ctx, `outcome = ?`, []any{OutcomeDropped}, since, until, 1)
+		if err != nil {
+			return nil, err
+		}
+		ids = rule
+	}
+	haiku, err := s.sample(ctx, `outcome = ? AND would_do = 'none' AND task IN ('', 'none')`,
+		[]any{OutcomeOK}, since, until, n-len(ids))
+	if err != nil {
+		return nil, err
+	}
+	return append(ids, haiku...), nil
+}
+
+// sample picks up to n random unposted current-version decisions in
+// [since, until) that also match where.
+func (s *Store) sample(ctx context.Context, where string, args []any, since, until time.Time, n int) ([]int64, error) {
+	if n <= 0 {
+		return nil, nil
+	}
+	args = append([]any{ts(since), ts(until), TriageVersion}, append(args, n)...)
 	rows, err := s.db.QueryContext(ctx, `SELECT id FROM decisions
 		WHERE created_at >= ? AND created_at < ? AND post_kind IS NULL AND triage_version = ?
-		  AND (outcome = ? OR (outcome = ? AND would_do = 'none' AND task IN ('', 'none')))
-		ORDER BY random() LIMIT ?`, ts(since), ts(until), TriageVersion, OutcomeDropped, OutcomeOK, n)
+		  AND `+where+`
+		ORDER BY random() LIMIT ?`, args...)
 	if err != nil {
 		return nil, err
 	}
