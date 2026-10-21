@@ -147,7 +147,7 @@
   const TriageVersion = 2
   type Decision struct { …; Task string; Ask string } // Task: a dispatch task, "none", or "" (rule/failed/pre-change)
   ```
-  `RecordDecision` always writes `triage_version = TriageVersion`. `Summary`'s all-time grade counts (`Graded`, `Up`, `AskFirstDown`) and `GradedEvents` include only `triage_version = TriageVersion`.
+  `RecordDecision` always writes `triage_version = TriageVersion`. `Summary`'s all-time grade counts (`Graded`, `Up`, `AskFirstDown`, `PendingGrades`) and `GradedEvents` include only `triage_version = TriageVersion`. `PendingGrades` is filtered too: otherwise old posts nobody will grade would show as "waiting" forever.
 
 - [ ] **Step 1: Write failing tests**
 
@@ -155,7 +155,7 @@
   - `TestRecordDecisionStoresTaskAndAsk`: record `{Task: "address_review", Ask: "reviewer says the backoff never resets", WouldDo: "none", PostKind: PostGrade}`. `DecisionView` returns the same `Task` and `Ask`.
   - `TestMigrationMarksExistingDecisionsAsPreChange`: insert a decision row with raw SQL that omits `triage_version`, and assert it reads back as `1`. Assert a `RecordDecision` row reads `TriageVersion`.
   - In `TestSampleQuietPicksOnlyUnpostedQuietDecisionsInWindow`, add `in("f", Decision{WouldDo: "none", Task: "fix_ci"})`. The expected set stays `{none, dropped}`.
-  - In `TestSummary`, add a graded-👎 decision marked pre-change. `Graded`, `Up` and `AskFirstDown` are unchanged (2, 1, 1). `GradedInWindow` rises by one, since window activity is not filtered.
+  - In `TestSummary`, add a graded-👎 decision marked pre-change. `Graded`, `Up` and `AskFirstDown` are unchanged (2, 1, 1). `GradedInWindow` rises by one, since window activity is not filtered. Also add an ungraded pre-change `PostGrade` decision: `PendingGrades` stays 1.
   - In `TestGradedEventsAndReadOnly`, add a graded pre-change decision. `GradedEvents` does not return it.
 
 - [ ] **Step 2: Run to verify they fail**
@@ -180,7 +180,7 @@
   - Insert `task`, `ask` and `triage_version` in `RecordDecision`.
   - Select `d.task`, `d.ask` in `viewQuery`, after `d.rationale`, and scan them.
   - In `SampleQuiet`, add `AND task IN ('', 'none')` to the OK branch.
-  - In `Summary`'s `latest` query, add `WHERE d.triage_version = ?`.
+  - In `Summary`'s `latest` query and the `PendingGrades` query, add `d.triage_version = ?`.
   - In `GradedEvents`, add `AND d.triage_version = ?`.
   - Update the `Summary` field comments from "all time" to "current triage version, all time".
 
@@ -247,6 +247,7 @@
     | `unknown task` | `task: "refactor"` | not a dispatch task |
     | `task and action both set` | `task: "address_review"`, `would_do: "merge"` | propose one |
     | `task without ask` | `task: "address_review"`, `ask: ""` | ask is required |
+    | `action without ask` | `would_do: "merge"`, `ask: ""` | ask is required |
     | `task without target` | `task: "address_review"`, `target: ""` | target is required |
     | `missing task field` | the old-shape JSON without `task`/`ask` | missing field |
 
@@ -328,7 +329,7 @@
     | none | `""` | `""` | `none` |
 
     Assert `d.Task` and `d.Ask` are stored.
-  - `TestTriageInvalidOutputIsFailedNotPosted`: the invalid output becomes `would_do: "comment_issue"` (no longer proposable).
+  - `TestTriageInvalidOutputIsFailedNotPosted`: the invalid output becomes the seven-key shape with `would_do: "comment_issue"` (no longer proposable), and the `RawOutput` assertion checks for `comment_issue` instead of `delete_repo`.
 
 - [ ] **Step 2: Run to verify they fail**
 
