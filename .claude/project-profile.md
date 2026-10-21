@@ -39,7 +39,7 @@ make smoke
 ## Dependencies
 
 - **Go modules:** `go.mod` and `go.sum` are authoritative. The toolchain is
-  `go 1.27.2`, and it must match the `golang:1.27-*` images in `Dockerfile`
+  `go 1.27.3`, and it must match the `golang:1.27-*` images in `Dockerfile`
   and `deploy/worker.Dockerfile`.
 - **Container base images:** `golang:1.27-alpine`, `alpine:3.24`,
   `golang:1.27-trixie` and `node:24-trixie-slim`. These are mutable tags,
