@@ -1,4 +1,4 @@
-.PHONY: test lint validate run image worker-image smoke deploy
+.PHONY: test lint validate run image worker-image smoke deploy skills-sync skills-check
 
 test:
 	go vet ./...
@@ -25,3 +25,13 @@ smoke: image
 
 deploy:
 	fly deploy . --config deploy/fly.toml --dockerfile Dockerfile
+
+# The one place the agent-skills ref lives. Bump it with skills-adopt's
+# "Bumping the pinned ref" steps, then run skills-sync.
+AGENT_SKILLS = npx -y github:cwinters8/agent-skills\#d311c8176584bea27bd17e9c371d46f9bfde072f
+
+skills-sync:
+	$(AGENT_SKILLS) sync
+
+skills-check:
+	$(AGENT_SKILLS) sync --check

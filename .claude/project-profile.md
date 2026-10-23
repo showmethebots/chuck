@@ -22,6 +22,7 @@ make lint
 govulncheck ./...
 make worker-image
 make smoke
+make skills-check
 
 ## Derived docs
 
@@ -34,6 +35,7 @@ make smoke
 | `cmd/chuck/main.go` (env vars and defaults) | its package doc comment, `Dockerfile` `ENV`, `deploy/entrypoint.sh`, `deploy/litestream.yml`, `deploy/smoke-restore.sh`, `deploy/fly.toml` `[env]`, `Makefile` `run`, `docs/phase-1-human-steps.md` (secret and env names), `.env.example` (names checked against the doc comment by `cmd/chuck/dotenv_test.go`), `README.md` "Running locally" |
 | `Makefile` targets | `README.md` "Development", this profile's `## Mechanical checks` |
 | `.github/workflows/ci.yml` checks | this profile's `## Mechanical checks` |
+| `Makefile` `AGENT_SKILLS` (the agent-skills ref) | `AGENTS.md` conventions (pin a commit, not a tag), this profile's `## Dependencies` |
 | Current phase | `README.md` status line, `deploy/worker.Dockerfile`, `internal/memory/migrations/0001_boots.sql` |
 
 ## Dependencies
@@ -49,6 +51,11 @@ make smoke
   bump must update both checksums.
 - **Claude Code** (worker image): an npm global pinned by `CLAUDE_CODE_VERSION`
   in `deploy/worker.Dockerfile`.
+- **agent-skills:** the npm package `@cwinters8/agent-skills`, fetched by
+  `npx` from GitHub and pinned to a full commit SHA in `Makefile`
+  `AGENT_SKILLS`. It vendors `.claude/skills/` and writes the lock in
+  `.claude/skills.json`. It has no dependencies of its own. Bump it with the
+  `skills-adopt` skill's "Bumping the pinned ref" steps.
 - **Alpine and apt packages:** `ca-certificates`, `git` and `openssh-client`.
   These are unpinned.
 - **CI:** GitHub Actions are SHA-pinned in `.github/workflows/ci.yml`.

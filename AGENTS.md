@@ -58,3 +58,9 @@ conventions the code already depends on.
   possible.
 - Integrations turn on independently from the environment (see the
   `cmd/chuck` doc comment). A partial Slack setup refuses to start.
+- The skills under `.claude/skills/` are vendored from
+  `cwinters8/agent-skills`, pinned to a full commit SHA in the `Makefile`
+  (`AGENT_SKILLS`). Pin a commit, not a tag: `v1` still points at package
+  1.0.0, which predates `init` and several of the skills vendored here, and
+  a tag can be repointed. Never hand-edit a vendored skill; `make
+  skills-sync` overwrites it. Fix it upstream and re-sync.
