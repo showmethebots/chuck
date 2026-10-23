@@ -1,0 +1,31 @@
+{
+  "skills": [
+    "action-versions",
+    "code-review",
+    "dependency-refresh",
+    "docs-currency",
+    "pr-preflight",
+    "profile-refresh",
+    "review-sweep",
+    "security-review",
+    "skills-adopt"
+  ],
+  "version": "2.5.0",
+  "files": {
+    "action-versions/SKILL.md": "925b835f5a32d6c4e1373bfd70395dbdcf3e7fd93c0a168945f3237f37aeeede",
+    "code-review/SKILL.md": "c620759072f5502bf164c284aa0272182b0f444b073e764f4b22beb4528104cf",
+    "dependency-refresh/SKILL.md": "d967945f1ca9b2604e76d7a07f16ccc4af9b2fb4963e3dc5e625a1f1c8b0b95a",
+    "docs-currency/SKILL.md": "9a44ba76b04be872df5a66d9eb43de78d357431225b90d5899c745644a2de52e",
+    "pr-preflight/SKILL.md": "078764f84e2b89b6ce73a1b94269671a8138a761fbd56f0c9f22ed86c59fab41",
+    "profile-refresh/SKILL.md": "1ff008982e05c68a29b19e945365113ca3df33041d15308c75aa238669401786",
+    "review-sweep/SKILL.md": "b1cd49bb6ff1fae0ea343937f196b3732ff6dcc740434c89da295158ca144179",
+    "security-review/SKILL.md": "5777a3eb6c748654e4f73592c02968fca335a9ae28d7dddee3c71d2774cbf326",
+    "security-review/references/ci-workflows.md": "d402ab3f1263c6afa346b6ed4d86602d3d98ff32afa3d2ad06a3cd19b688bd56",
+    "security-review/references/cloud-network.md": "292b449a3902e73b6d34d50930666acdd5f175ec443d46cc24cd0937a4cae800",
+    "security-review/references/config-as-code.md": "f726e0ccaae5e83d2b651e563c7d02c42aeec7da1cf6097803577ee987f6f074",
+    "security-review/references/infra-provisioning.md": "8b0be4973f33332536da22079732e15a7668b2dbb321695e82b2fa1f475b25ae",
+    "security-review/references/mobile-release.md": "b4b42c080047319513c3092ef51f49dc016e55489128e8667600935666307faa",
+    "security-review/references/postgres-rls.md": "3cecf3dad2143c9bfc96857cbfe76336eae5a4313e89c89db6a321e7f3439207",
+    "skills-adopt/SKILL.md": "62b8b15157b8513df5136b2223c5b12665e25dab128c31571d67aafadb9aa15c"
+  }
+}

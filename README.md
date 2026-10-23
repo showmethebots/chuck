@@ -57,6 +57,8 @@ make test       # vet + race tests
 make lint       # golangci-lint
 make run        # daemon locally, state in ./data, no Litestream
 make smoke      # build image, run the Litestream restore check
+make skills-check  # vendored agent skills match the pinned ref
+make skills-sync   # re-vendor them after bumping the ref
 ```
 
 ### Running locally
