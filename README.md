@@ -12,9 +12,9 @@ of truth.
 **Status: Phase 1 (shadow mode).** The daemon receives GitHub App webhooks,
 triages each event with Haiku into what it would have done, and posts
 decisions to Slack for grading and (for `ask_first` actions) approval. It
-takes no actions. Manual setup is in
-[docs/phase-1-human-steps.md](docs/phase-1-human-steps.md); the live check
-is [docs/shadow-checklist.md](docs/shadow-checklist.md).
+takes no actions, and announces each new deploy in `#chuck`. Manual setup
+is in [docs/phase-1-human-steps.md](docs/phase-1-human-steps.md); the
+live check is [docs/shadow-checklist.md](docs/shadow-checklist.md).
 
 ## Layout
 

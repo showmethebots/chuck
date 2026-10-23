@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"embed"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -120,6 +121,18 @@ func (s *Store) RecordBoot(ctx context.Context, version string) (int64, error) {
 	var n int64
 	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM boots`).Scan(&n)
 	return n, err
+}
+
+// PreviousBootVersion returns the version of the boot before the latest one,
+// or "" if there has been at most one. Call it after RecordBoot.
+func (s *Store) PreviousBootVersion(ctx context.Context) (string, error) {
+	var v string
+	err := s.db.QueryRowContext(ctx,
+		`SELECT version FROM boots ORDER BY id DESC LIMIT 1 OFFSET 1`).Scan(&v)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return v, err
 }
 
 // OpenReadOnly opens an existing database for reading only, without
