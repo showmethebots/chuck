@@ -1,5 +1,5 @@
-// Package events turns outside activity into stored events: GitHub App
-// webhook deliveries and the daemon's own cron ticks.
+// Package events stores GitHub App webhook deliveries. It moves into
+// internal/github when the loop lands.
 package events
 
 import (
@@ -41,7 +41,7 @@ type GitHubStore interface {
 }
 
 // GitHub receives GitHub App webhook deliveries. It verifies the signature,
-// stores the delivery verbatim, and returns 202; triage happens later.
+// stores the delivery verbatim, and returns 202. Nothing acts on it yet.
 type GitHub struct {
 	Secret []byte
 	Store  GitHubStore

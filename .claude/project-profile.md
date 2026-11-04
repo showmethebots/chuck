@@ -2,9 +2,9 @@
 
 ## Rules source
 
-`AGENTS.md`. `CLAUDE.md` only imports it (`@AGENTS.md`). The Notion design page
-named there is the source of truth for intended behavior. It lives outside
-the repo.
+`AGENTS.md`. `CLAUDE.md` only imports it (`@AGENTS.md`). The design specs in
+`docs/superpowers/specs/` are the source of truth for intended behavior; the
+current one is `2026-11-03-delivery-loop-design.md`.
 
 ## Repo
 
@@ -31,12 +31,12 @@ make skills-check
 | `deploy/fly.toml` (app name, region, volume name, single Machine, and its location under `deploy/`) | `deploy/README.md` intro note and bootstrap and exit-check commands (**followed against the Fly account**), `AGENTS.md` conventions (`-c deploy/fly.toml`), `Makefile` `deploy`, `.github/workflows/ci.yml` deploy step, the `fly.toml` header comment |
 | `deploy/entrypoint.sh` / `deploy/litestream.yml` (replica URL, Tigris secrets) | `deploy/README.md` step 3 (**followed against the Fly account**) |
 | `deploy/smoke-restore.sh` | `deploy/README.md` "Phase 0 exit check" |
-| `internal/config/config.go` (validation rules) | `README.md` "Config", header comments in `config/routes.yaml`, `config/policy.yaml` and `config/slack.yaml`, `AGENTS.md` (Slack allowlist and task-declaration invariants), `docs/phase-1-human-steps.md` section 3.3 (the `slack.yaml` shape) |
+| `cmd/chuck/main.go` `retiredConfig` | `config/README.md` |
 | `cmd/chuck/main.go` (env vars and defaults) | its package doc comment, `Dockerfile` `ENV`, `deploy/entrypoint.sh`, `deploy/litestream.yml`, `deploy/smoke-restore.sh`, `deploy/fly.toml` `[env]`, `Makefile` `run`, `docs/phase-1-human-steps.md` (secret and env names), `.env.example` (names checked against the doc comment by `cmd/chuck/dotenv_test.go`), `README.md` "Running locally" |
 | `Makefile` targets | `README.md` "Development", this profile's `## Mechanical checks` |
 | `.github/workflows/ci.yml` checks | this profile's `## Mechanical checks` |
 | `Makefile` `AGENT_SKILLS` (the agent-skills ref) | `AGENTS.md` conventions (pin a commit, not a tag), this profile's `## Dependencies` |
-| Current phase | `README.md` status line, `deploy/worker.Dockerfile`, `internal/memory/migrations/0001_boots.sql` |
+| Current phase | `README.md` status line, `deploy/worker.Dockerfile` header comment |
 
 ## Dependencies
 
@@ -65,22 +65,20 @@ make skills-check
 
 ## Review focus
 
-- The invariants in `AGENTS.md`. Weight two of them most heavily:
-  - the ask_first → `human` check in `internal/config`, because it is the
-    product's authorization model;
-  - single-writer state, which covers WAL, one connection, one Machine and
-    immutable migrations. Breaking it loses or forks the only copy of the
-    agent's memory.
+- The invariants in `AGENTS.md`. Weight single-writer state most heavily:
+  WAL, one connection, one Machine and immutable migrations. Breaking it
+  loses or forks the only copy of chuck's state.
+- A change against the delivery loop spec's security rules (who can set
+  `chuck/loop`, what a worker token carries, whose text reaches a prompt)
+  is the critical failure once the loop lands, even before `AGENTS.md`
+  records the rule.
 - A change to the config schema has to land with matching validation and
-  tests in `internal/config`, and `make validate` has to keep passing on the
-  shipped `config/`.
+  tests, and `make validate` has to keep passing on the shipped `config/`.
 - A change to the Go version has to touch `go.mod` and both Dockerfiles
   together.
 
 ## Not findings
 
-- Values in `config/policy.yaml` commented `placeholder: not set in the
-  design`. They are deliberate until the Notion design sets them.
 - `setup-flyctl` pinned at a tag with no matching GitHub release. The reason
   is under `## Exemptions`.
 
@@ -114,11 +112,8 @@ The body is read before the
 signature can be checked, so unsigned senders can still cause memory
 pressure (measured locally at about 127 MB peak against the 512 MB
 Machine) and can occupy both read slots; turning away non-GitHub senders
-before reading is the complete fix (issue #6). chuck also makes an
-outbound Slack Socket Mode connection; inbound
-commands and button clicks on it are checked against the `config/slack.yaml`
-allowlist before anything else happens (`internal/notify`, enforced with
-`internal/config`'s `Slack.RoleOf`). What matters is the Fly app, its
+before reading is the complete fix (issue #6). chuck makes no outbound
+calls today. What matters is the Fly app, its
 volume, and the Tigris bucket holding the replicated state. The control
 that guards them is credential custody. `FLY_API_TOKEN` is an app-scoped
 deploy token that only the CI `deploy` job can reach, through the
@@ -126,23 +121,12 @@ deploy token that only the CI `deploy` job can reach, through the
 never enter the repo. The workflow runs on `pull_request` and its token is
 `contents: read`, so a fork PR can't reach either credential.
 
-The product's own authorization model is the permission tiers in
-`config/policy.yaml`, enforced by `internal/config`. A change that lets an
-`ask_first` action reach a model tier is the critical failure. Phase 1 also
-sends untrusted GitHub text (issue bodies, comments, review text) to Haiku
-for triage (`internal/triage`); that text is data, never instructions —
-the model's output is validated against `policy.yaml`'s declared actions
-and `routes.yaml`'s declared dispatch tasks (at most one of `task` and
-`would_do` may be a real value), a proposed `target` must be a
-`https://github.com/` URL, `</event>` is escaped in the prompt so untrusted
-text can't close the tag early, and the agent marker (`<!-- agent: <skill>
--->`) is honoured only when the text's own author (`user.login`) is
-`cwinters8`. Decision posts escape `&`, `<` and `>` in the model's `target`,
-`ask`, and rationale and in the event URL (`internal/notify`), so the
-output can't post `<!channel>` or a link whose label hides its URL. Phase 1
-executes nothing: triage
-only records a decision and, for `ask_first` proposals, an approval — no
-code path acts on either.
+chuck stores webhook deliveries verbatim and acts on none of them while the
+delivery loop is rebuilt. The loop's own model (GitHub App tokens scoped
+per worker run, the `chuck/loop` status only chuck can set, the Claude
+proxy, the `humans` allowlist for dashboard logins and trusted feedback) is
+in the spec's "Identities", "Who can merge", "The Claude proxy" and
+"Trusted text" sections, and this model is rewritten as each piece lands.
 
 ## Trust boundary
 
@@ -150,10 +134,8 @@ code path acts on either.
 | --- | --- |
 | `config/**` | authorization |
 | `internal/config/**` | authorization |
-| `internal/daemon/**` | client-data, auth-session, authorization |
+| `internal/web/**` | client-data, auth-session, authorization |
 | `internal/events/**` | secrets, client-data |
-| `internal/notify/**` | authorization, secrets |
-| `internal/triage/**` | client-data, secrets, authorization |
 | `internal/memory/**` | client-data |
 | `cmd/**` | secrets, client-data |
 | `deploy/**` | auth-session, secrets, supply-chain |
@@ -181,11 +163,8 @@ by `cwinters8`, sharing one webhook secret — plus a dev App for local
 testing; all three get read-only repository permissions (Actions, Contents,
 Issues, Metadata, Pull requests). GitHub makes each App generate a private
 key before it can be installed, but the key is deleted rather than given to
-chuck, since chuck makes no GitHub API calls in Phase 1
+chuck, since chuck makes no GitHub API calls yet
 (`docs/phase-1-human-steps.md` section 1).
-Slack identity is the owner/member roles in `config/slack.yaml`
-(`internal/config`'s `Slack.RoleOf`), changed only by a merged PR — no chat
-command or runtime path can add a user or change a role (`AGENTS.md`).
 Deploys authenticate to Fly with an app-scoped `FLY_API_TOKEN` deploy
 token, which is stored on the `production` GitHub environment. Litestream
 authenticates to Tigris with `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`,
@@ -196,16 +175,13 @@ through `fly ssh console` with their own Fly account.
 
 Real secrets live in two places only: Fly app secrets and the GitHub
 `production` environment (`FLY_API_TOKEN`). The Fly app secrets are
-`BUCKET_NAME` and the `AWS_*` Tigris credentials, plus, as each integration
-turns on, `GITHUB_APP_WEBHOOK_SECRET`, `ANTHROPIC_API_KEY`,
-`SLACK_BOT_TOKEN`, and `SLACK_APP_TOKEN` (`docs/phase-1-human-steps.md`
-sections 1-3). The Slack channel IDs (`CHUCK_SLACK_MAIN_CHANNEL`,
-`CHUCK_SLACK_SHADOW_CHANNEL`) are set alongside those tokens but are not
-secret. `deploy/fly.toml` `[env]`, `Dockerfile` `ENV` and `config/*.yaml`
+`BUCKET_NAME` and the `AWS_*` Tigris credentials, plus `GITHUB_APP_WEBHOOK_SECRET` and `ANTHROPIC_API_KEY`
+(`docs/phase-1-human-steps.md`). chuck reads only the webhook secret today;
+the API key is kept for the loop's Claude proxy. The Slack secrets are
+unset by `docs/phase-1-human-steps.md` section 2. `deploy/fly.toml` `[env]`, `Dockerfile` `ENV` and `config/`
 are committed and baked into the image, so they hold non-secret settings
 only. Local runs are the one exception to the two places: a developer's
-credentials (the dev GitHub App's webhook secret, the dev Slack app's
-tokens, and whatever `ANTHROPIC_API_KEY` they use) sit in a `.env` at the
+credentials (the dev GitHub App's webhook secret) sit in a `.env` at the
 repo root that `cmd/chuck` loads at startup. It is copied from the
 committed `.env.example`, which holds empty placeholders only. Never commit
 a secret, `.env`, a `.db` file or `data/`. `.gitignore` and `.dockerignore`

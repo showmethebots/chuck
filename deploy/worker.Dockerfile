@@ -1,6 +1,6 @@
 # Worker image: one Claude Code headless task per ephemeral Fly Machine.
-# Phase 1 only builds this image (CI checks that it builds); nothing runs it
-# until Phase 3.
+# CI only builds this image; nothing runs it until chuck-worker lands
+# (docs/superpowers/specs/2026-11-03-delivery-loop-design.md, "Workers").
 
 FROM golang:1.27-trixie AS go
 
