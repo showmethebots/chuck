@@ -162,6 +162,8 @@ code path acts on either.
 | `go.sum` | supply-chain |
 | `.github/workflows/**` | supply-chain, secrets, release |
 | `Makefile` | supply-chain, release |
+| `docs/superpowers/specs/**` | authorization, auth-session, secrets, client-data, supply-chain, release |
+| `docs/superpowers/plans/**` | authorization, auth-session, secrets, client-data, supply-chain, release |
 
 ## Stack
 

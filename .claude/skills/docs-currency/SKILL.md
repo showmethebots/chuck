@@ -9,7 +9,7 @@ description: >
   variable or a changed default just moved, or when another skill invokes
   docs-currency.
 ---
-<!-- vendored from @cwinters8/agent-skills@2.5.0 — edit upstream, then re-run the sync -->
+<!-- vendored from @cwinters8/agent-skills@2.8.0 — edit upstream, then re-run the sync -->
 
 # Docs currency
 
@@ -207,7 +207,8 @@ default, a moved or deleted file, a retired command.
 
 ## Related skills
 
-`pr-preflight` invokes this skill as part of its project checks; `code-review`
+`pr-preflight` invokes this skill as part of its project checks, and
+`pr-review` routes an open PR to it the same way, report-only; `code-review`
 does not overlap with it, because that skill deliberately leaves documentation
 gaps alone. If either is named in a report and is not vendored here, say so
 rather than guessing at what it would have done.

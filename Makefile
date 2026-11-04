@@ -28,7 +28,10 @@ deploy:
 
 # The one place the agent-skills ref lives. Bump it with skills-adopt's
 # "Bumping the pinned ref" steps, then run skills-sync.
-AGENT_SKILLS = npx -y github:cwinters8/agent-skills\#d311c8176584bea27bd17e9c371d46f9bfde072f
+# Runs through npm 11 because npm 10 (bundled with Node 22) fails on a
+# full-length SHA in a git spec with "GitFetcher requires an Arborist
+# constructor". Drop the npm@11 wrapper once every machine is on npm 11.
+AGENT_SKILLS = npx -y npm@11 exec -y --package=github:cwinters8/agent-skills\#1f8e33d2ccf1524b500949b9d29c8f2a2b29aa3b -- agent-skills
 
 skills-sync:
 	$(AGENT_SKILLS) sync
