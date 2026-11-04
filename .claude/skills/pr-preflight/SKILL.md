@@ -3,11 +3,11 @@ name: pr-preflight
 description: >
   Pre-push QA gate. Run before pushing a branch or opening a PR: the project's
   mechanical checks, a self code-review, the project's own review focus and
-  security gate, then push, open a draft PR, and subscribe to its activity. Use
+  security gate, then push, open a PR, and subscribe to its activity. Use
   when a change is ready to ship, or when asked to "preflight", "run the QA
   gate", or "get this ready for review".
 ---
-<!-- vendored from @cwinters8/agent-skills@2.5.0 — edit upstream, then re-run the sync -->
+<!-- vendored from @cwinters8/agent-skills@2.8.0 — edit upstream, then re-run the sync -->
 
 # PR preflight
 
@@ -146,10 +146,27 @@ this repo; a harness without it should substitute reasoning through the flow.
   run them again — the gate applies to the exact tree being pushed, not the
   tree that existed at step 1.
 - Commit with a clear message and push with `git push -u origin <branch>`.
-- Open the PR the way `## Ship` says. Absent instructions: a **draft** PR, using
-  the `mcp__github__*` tools where a session has no `gh` CLI. The description
-  should say what changed, why, how it was verified, and any known gaps or
-  skipped review findings.
+- Open the PR the way `## Ship` says. Absent instructions: a PR **ready for
+  review**, using the `mcp__github__*` tools where a session has no `gh` CLI.
+  Open a draft only when `## Ship` asks for one. The description should say what
+  changed, why, how it was verified, and any known gaps or skipped review
+  findings, plus two fields that are easy to leave out and expensive to lose:
+
+  - **Non-goals**: what the change deliberately does not handle (e.g. "does not
+    repair hand-edited version fields").
+  - **Trust assumptions**: which inputs the project controls and which come
+    from outside (e.g. "the version field is written only by the bump script;
+    webhook bodies are untrusted until the signature check passes").
+
+  Write `none` rather than omitting either one, so an empty field reads as a
+  decision, not an oversight. `review-sweep` declines findings that contradict
+  them, and its fix-commit cap reads the trust assumptions to tell a real defect
+  from hardening against an input that cannot occur. Neither applies to a
+  security finding, and neither applies at all when the PR's author is not
+  trusted; that skill's §2 says why. The session that wrote the
+  change is the only one that knows which inputs are impossible; the
+  description is how that knowledge reaches a reviewer, a fresh session handed
+  the PR, or this session many rounds later.
 - Call `subscribe_pr_activity` for the new PR so review comments and CI
   failures flow back into the session, where the tooling supports it.
 - **If the subscription is refused because the repository is not configured for
@@ -180,9 +197,13 @@ this repo; a harness without it should substitute reasoning through the flow.
   delivered anyway. If a project wants a periodic backstop, that is a scheduled
   routine the project configures once — not something a session arms for itself.
 
-After the PR is open, hand off to the `review-sweep` skill for incoming
-reviewer feedback — either live in this session via the subscription, or by a
-scheduled sweep. That skill is also what marks a draft ready for review once it
-reaches the ready-to-merge bar, so the maintainer's only remaining action is the
-merge. If it isn't vendored here, say so when you report the PR: the draft stays
-a draft, and nothing triages the feedback this step just subscribed you to.
+After the PR is open, hand off to the `review-sweep` skill for incoming reviewer
+feedback — either live in this session via the subscription, or by a scheduled
+sweep. A session fixing findings directly, without running a sweep, is still
+bound by that skill's §7 stop conditions, and the fix-commit cap there counts
+its commits too: an in-session loop is where the longest runs happened,
+precisely because nothing on that path was counting. When `## Ship` had you open
+a draft, that skill is also what marks it ready for review once it reaches the
+ready-to-merge bar, so the maintainer's only remaining action is the merge. If
+it isn't vendored here, say so when you report the PR: nothing triages the
+feedback this step just subscribed you to, and any draft stays a draft.

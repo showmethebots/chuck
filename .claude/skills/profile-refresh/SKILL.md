@@ -8,7 +8,7 @@ description: >
   after a large refactor, migration, or rewrite merges — that is what
   invalidates a profile wholesale.
 ---
-<!-- vendored from @cwinters8/agent-skills@2.5.0 — edit upstream, then re-run the sync -->
+<!-- vendored from @cwinters8/agent-skills@2.8.0 — edit upstream, then re-run the sync -->
 
 # Profile refresh
 
@@ -117,11 +117,17 @@ needs rewording, which is a report and not a fix.
 
 Check visibility and the collaborator model against the repo's current state.
 Visibility is load-bearing: `review-sweep` may infer reviewer approval from a
-reaction-count delta only because the plausible reactors are known. A repo that
-went **public**, or gained collaborators, invalidates that shortcut entirely,
-and the profile is the only place that says so. A renamed repo or owner matters
-too — `code-review` builds permalinks from it, so a wrong `owner/repo` puts a
-404 in every review comment it posts.
+reaction-count delta, or read a bare 👎 as a decline, only because the
+plausible reactors are known. A repo that went **public**, or gained
+collaborators, invalidates that shortcut entirely, and the profile is the only
+place that says so. A renamed repo or owner matters too — `code-review` builds
+permalinks from it, so a wrong `owner/repo` puts a 404 in every review comment
+it posts. Check a named review bot is still installed, that its login is still
+the account that posts its reviews, and that its request form and clean signal
+still match how it behaves. A stale login means `review-sweep` never counts the
+bot's real clean signal; a bot named here after it was removed has
+`review-sweep` posting requests nobody answers. Either way every PR ends up
+blocked on a verdict that was never coming.
 
 ### `## Rules source`
 
@@ -213,10 +219,11 @@ be read as permission.
 
 Both directions, like every other section here. **Named but gone** — confirm
 each skill this section lists still exists in the repo; a hand-off to a deleted
-or renamed skill means `pr-preflight` names a gate in its report that never ran.
+or renamed skill means `pr-preflight` (or `pr-review`) names a gate in its
+report that never ran.
 **Present but unlisted** — enumerate the repo's own skill files and subtract the
 set vendored from this package; anything left that the section does not name is
-a gate `pr-preflight` never hands off to. That is the quieter half: the listed
+a gate neither `pr-preflight` nor `pr-review` ever hands off to. That is the quieter half: the listed
 name at least fails visibly when the hand-off misses, while a local skill added
 after the profile was written simply never runs, and the refresh reports the
 section verified. Propose the addition rather than writing it — what a local

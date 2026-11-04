@@ -12,7 +12,7 @@ description: >
   firewall exposure", "is this server hardened", "what is exposed to the
   internet", or "pre-launch security check".
 ---
-<!-- vendored from @cwinters8/agent-skills@2.5.0 — edit upstream, then re-run the sync -->
+<!-- vendored from @cwinters8/agent-skills@2.8.0 — edit upstream, then re-run the sync -->
 
 # Security review
 
@@ -552,7 +552,9 @@ trust boundary, it stands on its own merits.
 ## Relationship to the other skills
 
 `pr-preflight` invokes this skill for diffs touching the trust boundary, the
-same way it invokes `action-versions` for workflow diffs. `review-sweep`
+same way it invokes `action-versions` for workflow diffs. `pr-review` routes an
+open PR the same way, and also uses it without `pr-preflight`, as half of its
+two-review floor. `review-sweep`
 prioritizes reviewer-raised security issues — when one arrives, run the relevant
 group here rather than judging it ad hoc, and never decline it under a
 project's deferral policy.
