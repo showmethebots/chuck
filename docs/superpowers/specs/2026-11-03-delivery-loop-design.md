@@ -56,7 +56,9 @@ document and its successors in `docs/superpowers/specs/` are.
 
 - Code manages the flow; agents do the work.
 - Agents report; code transitions. Workers never change labels, merge or
-  deploy.
+  deploy. For merging that is enforced by the consumer's branch ruleset
+  and a commit status only chuck can set (see "Who can merge"), not by
+  the prompt.
 - Decide on facts code can check, not on the model's confidence.
 - The author is never the reviewer or the validator. The validator is
   read-only.
@@ -71,8 +73,8 @@ document and its successors in `docs/superpowers/specs/` are.
 |---|---|---|
 | `internal/github` | App auth (JWT, installation tokens scoped per call), the REST calls the loop makes, the webhook receiver | `internal/events`, octokit in the sketch |
 | `internal/loop` | `Transition(item, repo, cfg, input, now) Result`, the effect executor, WIP and stale rules, embedded prompts and verdict schemas | `loop/dispatch.cjs`, `prep.sh` |
-| `internal/worker` | Launch a Machine with prompt, schema, credentials and run token; watch; destroy; accept the callback | `claude-code-action` |
-| `internal/web` | OAuth login, sessions, CSRF, dashboard pages, worker API, `/healthz`, webhook mount | `internal/notify`, `internal/daemon` |
+| `internal/worker` | Launch a Machine with a run token; serve it the spec and short-lived GitHub tokens; watch; stop and destroy; accept the callback; filter trusted text | `claude-code-action` |
+| `internal/web` | OAuth login, sessions, CSRF, dashboard pages, worker API, the Claude proxy, `/healthz`, webhook mount | `internal/notify`, `internal/daemon` |
 | `internal/memory` | SQLite as today, migration `0004_loop.sql` | same package |
 | `internal/config` | `config/chuck.yaml` and per-repo `loop.json`, strict as today | the three YAML files |
 | `cmd/chuck` | `run`, `validate`; wires packages from the environment | same, minus `replay` |
@@ -103,11 +105,11 @@ The consumer `loop.yml` from the Notion spec does not exist.
 
 | Identity | Used for | Notes |
 |---|---|---|
-| chuck's GitHub App (`orionsbelt-dev`) | Webhooks, labels, comments, approve, merge, workflow dispatch, minting worker tokens, dashboard OAuth | Permissions: contents, issues, pull requests, actions (write); checks (read). Needs a private key as a Fly secret; today's Apps have none. |
-| Per-run installation token | One worker run | Scoped to the one repo and the stage's permission set, 1 h TTL. Build and sweep: contents, pull requests, issues write. Review: pull requests write. Validate: read only. |
+| chuck's GitHub App (`orionsbelt-dev`) | Webhooks, labels, comments, the `chuck/loop` commit status, merge, workflow dispatch, minting worker tokens, dashboard OAuth | Permissions: contents, issues, pull requests, statuses, actions (write); checks (read). Needs a private key as a Fly secret; today's Apps have none. chuck never approves a PR: the PRs are opened by its own App, and GitHub refuses a review approval from the author. |
+| Per-run installation token | One worker run | Scoped to the one repo and the stage's permission set, never `statuses`. Build and sweep: contents, pull requests, issues write. Review: pull requests write. Validate: read only. GitHub caps the TTL at 1 h, below build's wall clock, so the worker fetches tokens from `GET /api/runs/{id}/token` with its run token and chuck mints one only while the run is `running`. |
 | `cwinters8` App, dev App | Webhooks only until a repo under them joins the loop | Same secret. chuck shows their repos as "read-only installation". Adding one is a `config/chuck.yaml` entry plus a key. |
-| Humans | Dashboard login, labels that start or approve stages | GitHub user ids in `config/chuck.yaml`. One entry to start. |
-| Claude | Workers | `ANTHROPIC_API_KEY` from the Console org first (credits included with Max); `CLAUDE_CODE_OAUTH_TOKEN` as fallback when credits are exhausted. Both Fly secrets, passed to a Machine for one run. |
+| Humans | Dashboard login, labels that start or approve stages, feedback the sweep acts on | GitHub user ids in `config/chuck.yaml`. One entry to start. |
+| Claude | Workers | `ANTHROPIC_API_KEY` from the Console org first (credits included with Max); `CLAUDE_CODE_OAUTH_TOKEN` as fallback when credits are exhausted. Both are Fly secrets on `chuck` and never leave it: workers reach Claude through chuck's proxy (see "The Claude proxy"), authenticated by the run token. |
 
 chuck's own comments carry a hidden marker (`<!-- loop-verdict ... -->`)
 for the audit trail on GitHub. chuck never reads markers back; counts come
@@ -116,8 +118,10 @@ from `runs`.
 ### Request paths
 
 - Unauthenticated: `GET /healthz`, `POST /webhooks/github`, `GET /login`,
-  `GET /oauth/callback`, `GET /static/*`, and `/api/runs/{id}/*` with a
-  run token.
+  `GET /oauth/callback`, `GET /static/*`.
+- Run token: `GET /api/runs/{id}/spec`, `GET /api/runs/{id}/token`,
+  `POST /api/runs/{id}/verdict`, and the Claude proxy under
+  `/api/runs/{id}/anthropic/`. All refuse once the run leaves `running`.
 - Everything else needs a session.
 
 ## Data model
@@ -131,6 +135,7 @@ repos        id, owner, name, installation_id, app_owner, default_branch,
              enabled, config_json, config_sha, config_read_at
 items        id, repo_id, kind ('issue'|'pr'), number, title,
              issue_number,                   -- for a PR: the issue it serves
+             ratchet_of,                     -- for a ratchet issue: the issue it covers
              state, state_since, escalated_from, pending_stage,
              created_at, updated_at
              UNIQUE (repo_id, kind, number)
@@ -143,7 +148,7 @@ runs         id, item_id, stage, attempt, status,
              -- launching|running|finished|failed|cancelled|timed_out
              machine_id, machine_region, image, model,
              credential ('api_key'|'oauth'), prompt, schema_name, ref,
-             token_hash, started_at, callback_at, destroyed_at, exit_code,
+             token_hash, deadline_at, started_at, callback_at, destroyed_at, exit_code,
              cost_usd, input_tokens, output_tokens, duration_ms,
              verdict_json, log_tail
 evidence     id, run_id, path, content_type, bytes, sha256, content BLOB,
@@ -160,7 +165,11 @@ Decisions:
 - `items.state` is the answer; `transitions` is the history. The executor
   writes both in one transaction before any GitHub call, so chuck is never
   behind its own database. Label drift is repaired on the tick.
-- Verdicts are rows. Attempt and round counts are `COUNT(*)` over `runs`.
+- Verdicts are rows. Attempt and round caps count `DISTINCT attempt` over
+  `runs` per item and stage. A relaunch keeps its attempt number when the
+  Machine never started or the credential was exhausted; a run that
+  reached `running` and then finished, failed, timed out or was
+  cancelled uses the attempt up.
 - Evidence is a BLOB in SQLite, next to its run, replicated by Litestream.
   Moving it to Tigris later is a one-table change.
 - Migrations for tables a worker callback touches are additive only, so a
@@ -181,7 +190,7 @@ type Input struct {
 type Result struct {
     State   State
     Reason  string
-    Effects []Effect // SetLabel, Comment, Launch, ApproveAndAutoMerge, Merge,
+    Effects []Effect // SetLabel, Comment, Launch, SetStatus, EnableAutoMerge, Merge,
                      // DispatchWorkflow, Mention, DestroyMachine, OpenRatchetIssue
 }
 func Transition(item Item, repo Repo, cfg LoopConfig, in Input, now time.Time) Result
@@ -203,7 +212,7 @@ Active states, which count against `wip_limit`: `building`, `review`,
 
 | Input | Condition | Transition |
 |---|---|---|
-| `issues.labeled loop:intake` by a human, or dashboard Start intake | no item yet | → `intake`, launch intake |
+| `issues.labeled loop:intake` by a human, dashboard Start intake, or the `OpenRatchetIssue` effect | no item yet | → `intake`, launch intake |
 | verdict intake `ready_for_approval` | issue has `AC-n` lines, or sub-issues were opened | → `awaiting-approval`; sub-issues → `awaiting-approval` |
 | verdict intake `needs_clarification` or no criteria | | → `needs-human` |
 | `issues.labeled loop:ready` by a human, or dashboard Approve | `awaiting-approval` | → `ready` |
@@ -214,12 +223,14 @@ Active states, which count against `wip_limit`: `building`, `review`,
 | verdict review `posted` | `review` | → `sweep`, launch sweep |
 | verdict review `failed`, or rounds ≥ `review_rounds` | | → `needs-human` |
 | verdict sweep `changes_pushed` | | → `review`, launch review |
-| verdict sweep `ready` | head = reviewed sha, no open findings, no unfixed security findings, no risk paths, `auto_merge` | → `merging`, approve and enable auto-merge (direct merge if GitHub refuses on a clean PR) |
-| verdict sweep `ready` | any of those fails | → `awaiting-merge` with reasons |
+| verdict sweep `ready` | head = reviewed sha, no open findings, no unfixed security findings, no risk paths, `auto_merge` | → `merging`, set `chuck/loop` success on the head and enable auto-merge (direct merge if GitHub refuses auto-merge on a clean PR) |
+| verdict sweep `ready` | head = reviewed sha, no open findings, no unfixed security findings, but a risk path or `auto_merge` off | → `awaiting-merge` with reasons; `chuck/loop` success, so a human can merge |
+| verdict sweep `ready` | open or unfixed findings | → `awaiting-merge` with reasons; `chuck/loop` failure |
 | verdict sweep `ready` | head moved since review | → `review`, launch review |
 | verdict sweep `cap_reached` or `blocked` | | → `needs-human` |
-| `pull_request.synchronize` by a human | `review`, `sweep`, `awaiting-merge` | → `review`, launch review |
+| `pull_request.synchronize` by a human | `review`, `sweep`, `awaiting-merge` | → `review`, launch review; `chuck/loop` pending on the new head |
 | `pull_request.closed` merged | `merging`, `awaiting-merge` | → `merged` |
+| `pull_request.closed` merged | any other PR state | PR and issue → `needs-human`, "merged outside the loop" |
 | `pull_request.closed` not merged | any PR state | PR → `closed`; issue → `needs-human` |
 | `workflow_run deploy-dev` success for the merge sha | `merged` | → `validating`, launch validate |
 | `workflow_run deploy-dev` failure | `merged` | → `needs-human` |
@@ -227,7 +238,7 @@ Active states, which count against `wip_limit`: `building`, `review`,
 | verdict validate | criteria clear but risk path or `auto_promote` off | → `awaiting-prod-approval` |
 | verdict validate | anything else, including `undetermined` | → `needs-human` |
 | `pull_request.labeled loop:approve-prod` by a human, or dashboard Promote | `awaiting-prod-approval` | → `promoting`, dispatch deploy-prod |
-| `workflow_run deploy-prod` success | `promoting` | PR → `done`; issue → `done`; ratchet issue if enabled; start next ready |
+| `workflow_run deploy-prod` success | `promoting` | PR → `done`; issue → `done`; ratchet issue if `ratchet` is on and the issue is not itself a ratchet issue; start next ready |
 | `workflow_run deploy-prod` failure | `promoting` | → `needs-human` |
 | tick | active state older than `stale_hours` | → `needs-human` |
 | dashboard Re-queue | `needs-human` | → `escalated_from`, launch its stage |
@@ -258,16 +269,44 @@ WIP, caps, duplicate events and "is this still a loop PR" happen inside
 `Transition`, with counts supplied in `Facts`. There is no separate gate
 job.
 
+### Who can merge
+
+Build and sweep tokens carry contents and pull requests write, which is
+enough to call the merge API or push to the default branch. Three things
+outside the prompt stop that:
+
+- A ruleset on the consumer's default branch (a Phase 0 prerequisite)
+  requires a pull request, requires the repo's CI checks and the
+  `chuck/loop` status, and lists no bypass actor, so chuck's App is bound
+  by it too.
+- `chuck/loop` is a commit status that needs `statuses: write`. Worker
+  tokens never have it. chuck sets it `success` only in the transitions
+  above, so a PR cannot merge before the sweep verdict clears it, by
+  anyone.
+- `.claude/**` and `.github/**` are owned in `CODEOWNERS` and the ruleset
+  requires code-owner review. They are risk paths that stop at
+  `awaiting-merge` anyway; this makes a human review of a `loop.json`
+  change a GitHub rule rather than a chuck rule, so a worker cannot flip
+  `auto_merge` or `auto_promote` on its own.
+
+A merge that still arrives in a state other than `merging` or
+`awaiting-merge` escalates with "merged outside the loop".
+
 ## The ratchet
 
 Every criterion the validator passes becomes a permanent end-to-end test.
 
 1. The validator's Playwright scripts under `evidence/` are stored with
    the run, not only the screenshots.
-2. On `done`, if `ratchet` is on, chuck opens "Add e2e coverage for #N"
-   in the same repo, listing each passed `AC-n` with its script attached,
-   labelled `loop:intake`. Its criteria are mechanical: the suite includes
-   a test named `#N AC-n` and it passes against `BASE_URL`.
+2. On `done`, if `ratchet` is on and the item has no `ratchet_of`, the
+   `OpenRatchetIssue` effect opens "Add e2e coverage for #N" in the same
+   repo, listing each passed `AC-n` with its script attached, labels it
+   `loop:intake`, inserts its item in `intake` with `ratchet_of = N`, and
+   launches intake exactly as Start intake would (under `auto_advance:
+   false` that is a pending stage). The label is a mirror; the item does
+   not depend on the label webhook, which only trusts humans. Its criteria
+   are mechanical: the suite includes a test named `#N AC-n` and it passes
+   against `BASE_URL`. A ratchet issue reaching `done` opens nothing.
 3. The builder turns the scripts into tests in the repo's own e2e suite,
    and the item runs the whole loop. Validate on this item is the suite
    passing in dev.
@@ -297,18 +336,16 @@ there is nothing to ratchet for them.
 
 ### Launch
 
-1. Insert the `runs` row; generate a 32-byte run token; store its hash.
-2. Mint an installation token for the repo with the stage's permissions,
-   1 h TTL.
-3. Create a Machine in the `chuck-workers` Fly app (separate from `chuck`
+1. Insert the `runs` row with `deadline_at` = now + the stage's wall
+   clock; generate a 32-byte run token; store its hash.
+2. Create a Machine in the `chuck-workers` Fly app (separate from `chuck`
    so workers never share chuck's volume or secrets and survive chuck's
    deploys), `auto_destroy: true`, `restart: no`. Env: `CHUCK_URL`,
-   `CHUCK_RUN_ID`, `CHUCK_RUN_TOKEN`, `GITHUB_TOKEN`, `REPO`, `REF`,
-   `ISSUE`, `PR`, `ATTEMPT`, `SHA`, the Claude credential, `CLAUDE_MODEL`,
-   `CLAUDE_MAX_TURNS`, and for validate `DEV_URL` plus the repo's test
-   credentials from the Fly secret `LOOP_ENV_<owner>_<repo>`. Validator
-   Machines get Fly's restricted network.
-4. Machine size per stage from `loop.json` `machines`.
+   `CHUCK_RUN_ID`, `CHUCK_RUN_TOKEN`. Nothing else: the Machine config is
+   readable by anything holding the workers app token, so the only secret
+   in it is the run token, which authorises one run and dies with it.
+   Everything else comes from the spec endpoint.
+3. Machine size per stage from `loop.json` `machines`.
 
 Before any launch chuck checks spend against `config/chuck.yaml`; at the
 cap the item goes to `needs-human` with reason "budget".
@@ -317,20 +354,34 @@ cap the item goes to `needs-human` with reason "budget".
 
 `chuck-worker` is the image entrypoint.
 
-1. `GET /api/runs/{id}/spec` with the run token: prompt, schema, model,
-   turns. The prompt never passes through the Machines API.
-2. Clone the repo at `REF`; exclude `evidence/` and the token from git.
-3. Run `claude -p` with `--json-schema`, `--model`, `--max-turns`,
-   `--output-format json`; for validate, `--allowedTools` limited to read,
-   write under `evidence/`, `Bash(npx playwright:*)`, `Bash(node:*)`,
-   `Bash(curl:*)`. Tee output to a log.
-4. `POST /api/runs/{id}/verdict`: structured output, Claude Code's usage
+1. `GET /api/runs/{id}/spec` with the run token: repo, ref, issue, PR,
+   attempt, sha, stage, prompt, schema, model, max turns, deadline, and
+   for validate `DEV_URL` plus the repo's test credentials from the Fly
+   secret `LOOP_ENV_<owner>_<repo>`. The prompt never passes through the
+   Machines API.
+2. `GET /api/runs/{id}/token` for a GitHub token, written to a file that
+   git's credential helper and `gh`'s hosts file read. `chuck-worker`
+   refreshes it every 45 minutes, so a push in minute 80 of a build uses
+   a token minted in minute 45. Validate runs get a read-only token.
+3. Clone the repo at the ref; exclude `evidence/` and both token files
+   from git.
+4. Run `claude -p` with `--json-schema`, `--model`, `--max-turns`,
+   `--output-format json`, `ANTHROPIC_BASE_URL` pointing at chuck's proxy
+   for this run and `ANTHROPIC_API_KEY` set to the run token; for
+   validate, `--allowedTools` limited to read, write under `evidence/`,
+   `Bash(npx playwright:*)`, `Bash(node:*)`, `Bash(curl:*)`. Tee output
+   to a log.
+5. Five minutes before the deadline, if `claude` is still running:
+   SIGTERM it, and during build or sweep commit and push the working tree
+   to the stage's branch so the next attempt starts from it. The verdict
+   is then `error` with reason `timeout`. The worker enforces its own
+   deadline because a Machine destroyed from outside gets no grace period
+   and Fly's default stop signal is SIGINT.
+6. `POST /api/runs/{id}/verdict`: structured output, Claude Code's usage
    block, exit code, last 64 KB of log, and for validate a tar of
    `evidence/` (20 MB cap). Retries for 10 minutes with backoff, which
    covers a chuck deploy.
-5. On SIGTERM (wall clock) during build or sweep: commit and push the
-   working tree to the stage's branch so the next attempt starts from it.
-6. Exit; `auto_destroy` removes the Machine.
+7. Exit; `auto_destroy` removes the Machine.
 
 ### Back in chuck
 
@@ -338,18 +389,55 @@ cap the item goes to `needs-human` with reason "budget".
   only with the matching token hash. It validates against the stage
   schema again. Then it feeds a `Verdict` input to the loop.
 - A watcher polls the Machines API every 30 s for `running` rows. Machine
-  gone without a verdict → `failed`, `error` verdict. Past the stage's
-  wall clock → destroy, `timed_out`, `error` verdict. On boot the watcher
-  resumes every `running` row.
+  gone without a verdict → `failed`, `error` verdict. Ten minutes past
+  `deadline_at` with no verdict (the worker's own deadline has failed) →
+  stop the Machine with `signal: SIGTERM, timeout: 60s`, then destroy,
+  `timed_out`, `error` verdict. On boot the watcher resumes every
+  `running` row.
 - Wall clock: `limits.wall_clock` per stage in `loop.json` (defaults:
   build 90m, validate 60m, others 30m), under an absolute ceiling in
   `config/chuck.yaml` (4h). Run duration per stage and timeout count are
   dashboard metrics.
-- Credit exhaustion: if the log tail matches Claude Code's credit error,
-  chuck sets `api_key_exhausted_until` to the 1st of next month and
-  relaunches the same stage on the OAuth token as the same attempt.
+- Credit exhaustion: the proxy sees Claude's billing error directly. chuck
+  marks the run `failed` with reason `credits`, sets
+  `api_key_exhausted_until` to the 1st of next month, and relaunches the
+  same stage on the OAuth token as the same attempt.
 - Running workers keep their image through a chuck deploy; `runs.image`
   records which ran.
+
+### The Claude proxy
+
+Workers never hold a Claude credential. `ANTHROPIC_BASE_URL` in the
+worker points at `/api/runs/{id}/anthropic/` on chuck, and the
+`ANTHROPIC_API_KEY` the worker sends is its run token. chuck checks the
+token hash and that the run is `running`, replaces the auth header with
+the credential chosen for the run (`x-api-key` for the Console key,
+`Authorization: Bearer` for the OAuth token), streams the request to
+`api.anthropic.com` and the response back, and records usage from the
+response for `spend`. A credential a prompt-injected worker exfiltrates is
+therefore the run token, which stops working at the verdict. The proxy
+is a `httputil.ReverseProxy` with streaming on; with `wip_limit: 1` the
+traffic is one session's. The run page shows requests and tokens through
+the proxy.
+
+### Trusted text
+
+Every prompt carries text chuck does not control: issue bodies, comments,
+review threads, the repo's files. On a public repo anyone can add a
+comment to a loop PR, and sweep turns comments into pushed commits. So
+chuck decides whose feedback counts before it builds a prompt, and the
+prompt never sees the rest:
+
+- Sweep and build receive review comments, PR comments and issue comments
+  only from users in `humans` and from chuck's own App (the review stage
+  posts as the App). Everything else is omitted from the prompt and
+  listed on the item page as "ignored feedback" with the author.
+- `issues.labeled`, `pull_request.labeled` and `pull_request.synchronize`
+  transition only when the sender is in `humans`, as the table says.
+- The issue body itself is read by intake whoever wrote it; that is what
+  `awaiting-approval` is for.
+
+This is filtering in code, not an instruction in the prompt.
 
 ### Prompts
 
@@ -380,6 +468,14 @@ chuck. `internal/worker` has a `Launcher` interface: `Fly`, `Local`
   logged with IP; the callback is rate-limited to 10 a minute.
 - The transition table refuses an action that does not apply to the
   current state, so a stale page can never double-launch.
+- Evidence is worker-supplied content from a browser that ran the PR's
+  own code, so chuck never trusts `evidence.content_type`. It sniffs the
+  bytes and serves inline only `image/png`, `image/jpeg`, `image/webp`
+  and `text/plain`; anything else, including SVG and HTML, is served as
+  `application/octet-stream` with `Content-Disposition: attachment`.
+  Every response carries `X-Content-Type-Options: nosniff`, and every
+  page a `Content-Security-Policy` of `default-src 'self'` with no inline
+  script, which is why the one script lives under `/static/`.
 
 ### Pages
 
@@ -405,8 +501,15 @@ Rule: anything chuck knows about an item is on its page or one click away.
 Kept from `internal/events`: HMAC-SHA256 over the raw body against
 `GITHUB_APP_WEBHOOK_SECRET`, 25 MB cap, two read slots, 10 s bounds,
 verbatim storage keyed by delivery id, 202 then async handling. Added,
-closing issue #6: reject before reading unless `User-Agent` starts with
-`GitHub-Hookshot/` and `X-Hub-Signature-256` is present.
+closing issue #6 as written there: before a read slot is taken, the
+request's `Fly-Client-IP` must fall inside the `hooks` ranges (IPv4 and
+IPv6) of `https://api.github.com/meta`, fetched at startup and refreshed
+daily, keeping the last good list on a failed refresh and a built-in
+list if the first fetch fails. Outside the ranges, or no header: 403
+without reading the body, logged with the IP. `CHUCK_WEBHOOK_ALLOW_ANY_IP=1`
+skips the check for local development through a tunnel and is logged
+loudly at startup. Header checks alone would not do: any sender can set
+`User-Agent` and `X-Hub-Signature-256`.
 
 ## Config
 
@@ -475,15 +578,19 @@ the transition row, idempotent effects are retried on the tick, and
 
 | Where | What | Outcome |
 |---|---|---|
-| GitHub | Bad or missing signature, non-GitHub user agent | Rejected before the body is read; logged with IP |
+| GitHub | Client IP outside GitHub's hook ranges | 403 before the body is read; logged with IP |
+| GitHub | Bad or missing signature | 401 after the read; logged with IP |
 | GitHub | Duplicate delivery | No-op on the unique delivery id |
 | GitHub | Unexpected event (non-human label, wrong state, fork PR) | No transition; reason on the webhook row |
+| GitHub | PR merged from a state other than `merging` or `awaiting-merge` | `needs-human`, "merged outside the loop" |
 | GitHub | API error during an effect | Retried on the tick; escalates after three ticks |
 | GitHub | `loop.json` missing or invalid | Repo shown as config invalid; nothing launches |
-| Worker | Machine never starts | Run failed; stage retried on the tick within the attempt cap |
-| Worker | Machine gone without a verdict, or past the wall clock | `error` verdict; build retries within the cap from its pushed branch, other stages escalate |
+| Worker | Machine never starts | Run failed; relaunched on the tick as the same attempt |
+| Worker | Worker hits its deadline | Pushes its tree (build, sweep), posts `error`/`timeout`; build retries within the cap from the pushed branch, other stages escalate |
+| Worker | Machine gone without a verdict, or ten minutes past the deadline | Stopped with SIGTERM then destroyed; `error` verdict; same retry rule |
 | Worker | Verdict fails schema validation | 422; run becomes failed with the validation error quoted; escalates |
-| Worker | API key credits exhausted | Relaunch on the OAuth token, same attempt; flag shown on `/spend` |
+| Worker | Proxy call after the run left `running`, or with a wrong token | 401; nothing forwarded |
+| Worker | API key credits exhausted (seen at the proxy) | Relaunch on the OAuth token, same attempt; flag shown on `/spend` |
 | Worker | Both credentials fail | Every launch → `needs-human`, "no working Claude credential" |
 | Worker | Evidence over 20 MB | Verdict accepted, evidence dropped, run flagged |
 | Policy | Spend cap reached | `needs-human`, "budget"; raise by PR, then Re-queue |
@@ -501,21 +608,30 @@ Every package tests through its interface with fakes for GitHub, Fly and
 the clock. Most tests live in `internal/loop` and `internal/web`.
 
 - `internal/loop`: every row of the transition table, WIP waiting and
-  release, every cap, every sweep and validate policy branch, a
-  `Supersedes` target that does not exist, non-human labels and wrong-state
-  labels, `auto_advance` off, Re-queue to `escalated_from`.
+  release, every cap including a same-attempt relaunch that does not
+  consume one, every sweep and validate policy branch, a `Supersedes`
+  target that does not exist, non-human labels and wrong-state labels, a
+  merge outside the loop, a ratchet item reaching `done` opening nothing,
+  `auto_advance` off, Re-queue to `escalated_from`.
 - `internal/web`: OAuth (bad state, replayed code, user not in humans,
   PKCE mismatch), sessions (forged, expired, revoked, sliding), CSRF
   (missing, wrong session, GET on an action), worker API (wrong token,
-  second verdict, verdict after close, oversized evidence, invalid
-  schema), webhook (bad signature, empty secret, duplicate, bad user
-  agent, oversized body), every page with an empty and a full store.
-- `internal/worker`: env and permissions per stage, watcher cases,
-  credit-exhausted relaunch, spend cap.
+  second verdict, verdict after close, token or proxy call after close,
+  oversized evidence, invalid schema), the proxy (header swap, streaming,
+  usage recorded, billing error flagged), webhook (IP outside the ranges,
+  missing `Fly-Client-IP`, dev override, failed range refresh keeps the
+  list, bad signature, empty secret, duplicate, oversized body), evidence
+  served with sniffed types and never inline for HTML or SVG, CSP on
+  every page, every page with an empty and a full store.
+- `internal/worker`: spec and permissions per stage, `statuses` absent
+  from every worker token, trusted-text filtering by author, watcher
+  cases including stop-then-destroy, credit-exhausted relaunch, spend cap.
 - `cmd/chuck-worker`: against an httptest chuck with a fake `claude`;
-  evidence tar excludes `.git` and the token; non-zero exit still posts.
+  token refresh; the deadline path pushes and posts `timeout`; evidence
+  tar excludes `.git` and the token files; non-zero exit still posts.
 - `internal/github`: token minting with scoped permissions, every REST
-  call, auto-merge refusal → direct merge, `loop.json` by blob SHA.
+  call, the `chuck/loop` status, auto-merge refusal → direct merge,
+  `loop.json` by blob SHA.
 - `internal/memory`: migration 0004 on a Phase 1 database, state and
   transition in one tx, spend rollup, retention, session expiry.
 - `internal/config`: strict decoding, every error together, schema.
@@ -536,10 +652,13 @@ GitHub drives one issue from intake to done.
   `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY`, `GITHUB_OAUTH_CLIENT_ID`,
   `GITHUB_OAUTH_CLIENT_SECRET`, `FLY_WORKERS_TOKEN`, `ANTHROPIC_API_KEY`,
   `CLAUDE_CODE_OAUTH_TOKEN`, `CHUCK_SESSION_KEY`.
-- Each consumer repo: CI with required checks on main, a Playwright setup
-  that targets `BASE_URL`, `deploy-dev` and `deploy-prod` workflows, a
-  stable dev URL and `LOOP_ENV_<owner>_<repo>` if it needs credentials,
-  `loop.json`, skills vendored and profile current.
+- Each consumer repo: a ruleset on the default branch that requires a
+  pull request, the CI checks and the `chuck/loop` status, with no bypass
+  actors; `CODEOWNERS` covering `.claude/**` and `.github/**` with
+  code-owner review required; a Playwright setup that targets `BASE_URL`;
+  `deploy-dev` and `deploy-prod` workflows; a stable dev URL and
+  `LOOP_ENV_<owner>_<repo>` if it needs credentials; `loop.json`; skills
+  vendored and profile current.
 - Manual steps in `docs/phase-0-human-steps.md` (replacing the Phase 1
   document) in the order they become possible.
 
@@ -571,11 +690,10 @@ checks, time from `ready` to `done`, cost per item, flaky-test count.
 
 ## Open questions
 
-- Whether Claude Code's credit-exhausted error is stable enough to match
-  on. Verify on the first exhaustion; until then the fallback is manual
-  (set `api_key_exhausted_until` from the dashboard's `/spend`).
-- `review-sweep`'s trusted-author rules and chuck's App comments: decide
-  when the sweep prompt is tuned.
+- Whether Claude Code with `CLAUDE_CODE_OAUTH_TOKEN` honours
+  `ANTHROPIC_BASE_URL` the way the API-key path does. Verify before the
+  first exhaustion; until then the fallback is manual (set
+  `api_key_exhausted_until` from the dashboard's `/spend`).
 - The `cwinters8` App joining the loop: config and a key, no code, but
   untested until a personal repo needs it.
 - Evidence size in practice. 20 MB is a guess; the cap is one constant.
@@ -585,9 +703,13 @@ checks, time from `ready` to `done`, cost per item, flaky-test count.
 `AGENTS.md` invariants to replace: the ask_first, Slack allowlist, "Phase 1
 executes nothing", routes and policy declarations, and per-tier budget
 rules go. New invariants: state is committed before effects; workers
-never hold chuck's App token; the validator token is read-only;
-`awaiting-approval` is always a human gate; `loop.json` is a risk path;
-additive migrations only for tables a worker callback touches. The
+never hold chuck's App token or a Claude credential; no worker token
+carries `statuses`; the `chuck/loop` status is set `success` only by the
+sweep-ready transitions; the validator token is read-only; prompts carry
+feedback only from `humans` and chuck's App; `awaiting-approval` is
+always a human gate; `loop.json` is a risk path; evidence is never served
+inline except as sniffed image or plain-text types; additive migrations
+only for tables a worker callback touches. The
 single-writer, Litestream, single-Machine and immutable-migration
 invariants stay. "Design decisions live in Notion" becomes "design
 decisions live in `docs/superpowers/specs/`". The project profile's
