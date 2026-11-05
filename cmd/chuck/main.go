@@ -4,12 +4,12 @@
 // without acting on them.
 //
 //	chuck run       start the server (default)
-//	chuck validate  check the config directory, then exit
+//	chuck validate [loop.json ...]  check config/chuck.yaml and any loop.json files given, then exit
 //
 // Environment, read from the process and then from ./.env if it exists. A
 // variable already set in the process wins over the same one in .env.
 //
-//	CHUCK_CONFIG_DIR           config directory (default ./config)
+//	CHUCK_CONFIG_DIR           directory holding chuck.yaml (default ./config)
 //	CHUCK_DB_PATH              SQLite state file (default ./data/chuck.db)
 //	CHUCK_HEARTBEAT            heartbeat interval as a Go duration (default 1m)
 //	PORT                       HTTP listen port (default 8080)
@@ -32,6 +32,7 @@ import (
 
 	"github.com/joho/godotenv"
 
+	"github.com/orionsbelt-dev/chuck/internal/config"
 	"github.com/orionsbelt-dev/chuck/internal/events"
 	"github.com/orionsbelt-dev/chuck/internal/memory"
 	"github.com/orionsbelt-dev/chuck/internal/web"
@@ -71,12 +72,7 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout,
 
 	switch cmd {
 	case "validate":
-		if err := checkConfigDir(configDir); err != nil {
-			_, _ = fmt.Fprintf(stderr, "invalid config in %s:\n%v\n", configDir, err)
-			return 1
-		}
-		_, _ = fmt.Fprintf(stdout, "config in %s is valid\n", configDir)
-		return 0
+		return runValidate(configDir, args[1:], stdout, stderr)
 	case "run":
 		if err := runServer(ctx, log, getenv, configDir); err != nil {
 			log.Error("server failed", "err", err.Error())
@@ -94,27 +90,53 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout,
 // so refusing it beats silently ignoring rules someone expects to hold.
 var retiredConfig = []string{"routes.yaml", "policy.yaml", "slack.yaml"}
 
-// checkConfigDir is all the validation there is until config/chuck.yaml
-// lands: the directory exists and holds none of the retired files.
-func checkConfigDir(dir string) error {
-	info, err := os.Stat(dir)
-	if err != nil {
-		return err
-	}
-	if !info.IsDir() {
-		return fmt.Errorf("%s is not a directory", dir)
-	}
+// checkConfigDir checks dir/chuck.yaml without resolving its ${VAR}
+// references (CI has none of the secrets) and refuses a directory that
+// still holds a retired file.
+func checkConfigDir(dir string) (*config.Chuck, error) {
 	var errs []error
 	for _, name := range retiredConfig {
 		if _, err := os.Stat(filepath.Join(dir, name)); err == nil {
 			errs = append(errs, fmt.Errorf("%s is retired with the project-manager framing; delete it", name))
 		}
 	}
-	return errors.Join(errs...)
+	c, err := config.LoadChuck(dir)
+	if err != nil {
+		errs = append(errs, err)
+	}
+	return c, errors.Join(errs...)
+}
+
+// runValidate checks the config directory and each loop.json named, and
+// reports every file's problems before exiting.
+func runValidate(configDir string, loopFiles []string, stdout, stderr io.Writer) int {
+	code := 0
+	if _, err := checkConfigDir(configDir); err != nil {
+		_, _ = fmt.Fprintf(stderr, "invalid config in %s:\n%v\n", configDir, err)
+		code = 1
+	} else {
+		_, _ = fmt.Fprintf(stdout, "config in %s is valid\n", configDir)
+	}
+	for _, f := range loopFiles {
+		b, err := os.ReadFile(f)
+		if err == nil {
+			_, err = config.ParseLoop(b)
+		}
+		if err != nil {
+			_, _ = fmt.Fprintf(stderr, "invalid loop config %s:\n%v\n", f, err)
+			code = 1
+			continue
+		}
+		_, _ = fmt.Fprintf(stdout, "loop config %s is valid\n", f)
+	}
+	return code
 }
 
 func runServer(ctx context.Context, log *slog.Logger, getenv func(string) string, configDir string) error {
-	if err := checkConfigDir(configDir); err != nil {
+	// Structure only: the secrets chuck.yaml names are resolved when the
+	// loop starts using them, so a deploy before they are set still serves
+	// /healthz and the webhook.
+	if _, err := checkConfigDir(configDir); err != nil {
 		return fmt.Errorf("config: %w", err)
 	}
 	interval, err := time.ParseDuration(envOr(getenv, "CHUCK_HEARTBEAT", "1m"))

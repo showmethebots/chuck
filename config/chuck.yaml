@@ -1,0 +1,31 @@
+# chuck-wide config, changed only by pull request. The shape and every
+# validation rule are in internal/config (chuck.go); the design is the
+# "Config" section of docs/superpowers/specs/2026-11-03-delivery-loop-design.md.
+#
+# ${VAR} is the only substitution and resolves from the environment (Fly
+# secrets). private_key and oauth_client_secret may only be references.
+
+# GitHub users chuck trusts, by numeric id (logins can be renamed).
+humans:
+  - id: 40615752 # cwinters8
+
+apps:
+  - owner: showmethebots
+    app_id: ${GITHUB_APP_ID}
+    private_key: ${GITHUB_APP_PRIVATE_KEY}
+    oauth_client_id: ${GITHUB_OAUTH_CLIENT_ID}
+    oauth_client_secret: ${GITHUB_OAUTH_CLIENT_SECRET}
+
+workers:
+  fly_app: chuck-workers
+  # Set by the deploy job to the worker image it pushed, so chuck launches
+  # the image built from the same commit.
+  image: ${CHUCK_WORKER_IMAGE}
+  wall_clock_ceiling: 4h
+
+spend:
+  monthly_usd: 100
+  per_repo_monthly_usd: 60
+
+tick: 30m
+webhook_retention: 720h

@@ -105,7 +105,7 @@ The consumer `loop.yml` from the Notion spec does not exist.
 
 | Identity | Used for | Notes |
 |---|---|---|
-| chuck's GitHub App (`orionsbelt-dev`) | Webhooks, labels, comments, the `chuck/loop` commit status, merge, workflow dispatch, minting worker tokens, dashboard OAuth | Permissions: contents, issues, pull requests, statuses, actions (write); checks (read). Needs a private key as a Fly secret; today's Apps have none. chuck never approves a PR: the PRs are opened by its own App, and GitHub refuses a review approval from the author. |
+| chuck's GitHub App (`showmethebots`, formerly `orionsbelt-dev`) | Webhooks, labels, comments, the `chuck/loop` commit status, merge, workflow dispatch, minting worker tokens, dashboard OAuth | Permissions: contents, issues, pull requests, statuses, actions (write); checks (read). Needs a private key as a Fly secret; today's Apps have none. chuck never approves a PR: the PRs are opened by its own App, and GitHub refuses a review approval from the author. |
 | Per-run installation token | One worker run | Scoped to the one repo and the stage's permission set, never `statuses`. Build and sweep: contents, pull requests, issues write. Review: pull requests write. Validate: read only. GitHub caps the TTL at 1 h, below build's wall clock, so the worker fetches tokens from `GET /api/runs/{id}/token` with its run token and chuck mints one only while the run is `running`. |
 | `cwinters8` App, dev App | Webhooks only until a repo under them joins the loop | Same secret. chuck shows their repos as "read-only installation". Adding one is a `config/chuck.yaml` entry plus a key. |
 | Humans | Dashboard login, labels that start or approve stages, feedback the sweep acts on | GitHub user ids in `config/chuck.yaml`. One entry to start. |
@@ -519,14 +519,14 @@ loudly at startup. Header checks alone would not do: any sender can set
 humans:
   - id: 1234567            # cwinters8
 apps:
-  - owner: orionsbelt-dev
+  - owner: showmethebots
     app_id: ${GITHUB_APP_ID}
     private_key: ${GITHUB_APP_PRIVATE_KEY}
     oauth_client_id: ${GITHUB_OAUTH_CLIENT_ID}
     oauth_client_secret: ${GITHUB_OAUTH_CLIENT_SECRET}
 workers:
   fly_app: chuck-workers
-  image: registry.fly.io/chuck-workers:sha-...
+  image: ${CHUCK_WORKER_IMAGE}   # set by the deploy job to the image it pushed
   wall_clock_ceiling: 4h
 spend:
   monthly_usd: 100
@@ -648,10 +648,12 @@ GitHub drives one issue from intake to done.
 
 - chuck: migration 0004, the packages above, the dashboard, the worker
   image, the `chuck-workers` Fly app. Private key and OAuth client on the
-  `orionsbelt-dev` App; permissions raised. New Fly secrets:
+  `showmethebots` App; permissions raised. New Fly secrets:
   `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY`, `GITHUB_OAUTH_CLIENT_ID`,
   `GITHUB_OAUTH_CLIENT_SECRET`, `FLY_WORKERS_TOKEN`, `ANTHROPIC_API_KEY`,
-  `CLAUDE_CODE_OAUTH_TOKEN`, `CHUCK_SESSION_KEY`.
+  `CLAUDE_CODE_OAUTH_TOKEN`, `CHUCK_SESSION_KEY`, and `CHUCK_WORKER_IMAGE`
+  (not a secret; the deploy job sets it to the worker image built from the
+  same commit).
 - Each consumer repo: a ruleset on the default branch that requires a
   pull request, the CI checks and the `chuck/loop` status, with no bypass
   actors; `CODEOWNERS` covering `.claude/**` and `.github/**` with

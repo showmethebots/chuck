@@ -1,0 +1,12 @@
+{
+  "default_branch": "main",
+  "wip_limit": 1,
+  "merge_method": "MERGE",
+  "limits": { "build_attempts": 1, "review_rounds": 1, "stale_hours": 1 },
+  "models": { "default": "claude-sonnet-5-5" },
+  "max_turns": { "default": 10 },
+  "machines": { "default": "shared-cpu-1x:1024" },
+  "deploy": { "dev_url": "https://dev.example.com", "dev_workflow": "d", "prod_workflow": "p" },
+  "validate": { "e2e_command": "npx playwright test" },
+  "AUTO_MERGE": true
+}

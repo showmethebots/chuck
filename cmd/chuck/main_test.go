@@ -25,7 +25,7 @@ func TestValidateShippedConfig(t *testing.T) {
 // A config directory left over from the project-manager framing must not
 // pass: its rules no longer hold, and someone may still expect them to.
 func TestValidateRejectsRetiredConfig(t *testing.T) {
-	dir := t.TempDir()
+	dir := copyShippedConfig(t)
 	for _, name := range retiredConfig {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte("{}\n"), 0o644); err != nil {
 			t.Fatal(err)
@@ -53,6 +53,48 @@ func TestValidateMissingDir(t *testing.T) {
 	}
 }
 
+// copyShippedConfig returns a temp directory holding the shipped
+// chuck.yaml.
+func copyShippedConfig(t *testing.T) string {
+	t.Helper()
+	b, err := os.ReadFile("../../config/chuck.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "chuck.yaml"), b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+func TestValidateReportsBadChuckConfig(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "chuck.yaml"), []byte("humans: []\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out, errOut bytes.Buffer
+	code := run(context.Background(), []string{"validate"},
+		env(map[string]string{"CHUCK_CONFIG_DIR": dir}), &out, &errOut)
+	if code != 1 || !strings.Contains(errOut.String(), "humans: at least one") {
+		t.Fatalf("exit %d, stderr: %s", code, errOut.String())
+	}
+}
+
+func TestValidateLoopFiles(t *testing.T) {
+	good := "../../internal/config/testdata/loop/valid/spec-example.json"
+	bad := "../../internal/config/testdata/loop/invalid/wip-zero.json"
+	var out, errOut bytes.Buffer
+	code := run(context.Background(), []string{"validate", good, bad},
+		env(map[string]string{"CHUCK_CONFIG_DIR": "../../config"}), &out, &errOut)
+	if code != 1 {
+		t.Fatalf("exit %d, want 1", code)
+	}
+	if !strings.Contains(out.String(), "spec-example.json is valid") || !strings.Contains(errOut.String(), "wip_limit") {
+		t.Fatalf("stdout: %s\nstderr: %s", out.String(), errOut.String())
+	}
+}
+
 func TestUnknownCommand(t *testing.T) {
 	var out, errOut bytes.Buffer
 	if code := run(context.Background(), []string{"replay"}, env(nil), &out, &errOut); code != 2 {
@@ -62,7 +104,7 @@ func TestUnknownCommand(t *testing.T) {
 
 // run refuses to start on invalid config, before touching the DB.
 func TestRunFailsFastOnBadConfig(t *testing.T) {
-	cfgDir := t.TempDir()
+	cfgDir := copyShippedConfig(t)
 	if err := os.WriteFile(filepath.Join(cfgDir, "slack.yaml"), []byte("{}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}

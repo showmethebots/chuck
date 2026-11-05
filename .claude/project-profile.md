@@ -31,6 +31,7 @@ make skills-check
 | `deploy/fly.toml` (app name, region, volume name, single Machine, and its location under `deploy/`) | `deploy/README.md` intro note and bootstrap and exit-check commands (**followed against the Fly account**), `AGENTS.md` conventions (`-c deploy/fly.toml`), `Makefile` `deploy`, `.github/workflows/ci.yml` deploy step, the `fly.toml` header comment |
 | `deploy/entrypoint.sh` / `deploy/litestream.yml` (replica URL, Tigris secrets) | `deploy/README.md` step 3 (**followed against the Fly account**) |
 | `deploy/smoke-restore.sh` | `deploy/README.md` "Phase 0 exit check" |
+| `internal/config` (validation rules) | `config/README.md`, the `config/chuck.yaml` header comment, `config/loop.schema.json` (kept agreeing by `TestSchemaAgreesWithValidator`), `AGENTS.md` invariants on config secrets and risk paths |
 | `cmd/chuck/main.go` `retiredConfig` | `config/README.md` |
 | `cmd/chuck/main.go` (env vars and defaults) | its package doc comment, `Dockerfile` `ENV`, `deploy/entrypoint.sh`, `deploy/litestream.yml`, `deploy/smoke-restore.sh`, `deploy/fly.toml` `[env]`, `Makefile` `run`, `docs/phase-1-human-steps.md` (secret and env names), `.env.example` (names checked against the doc comment by `cmd/chuck/dotenv_test.go`), `README.md` "Running locally" |
 | `Makefile` targets | `README.md` "Development", this profile's `## Mechanical checks` |
@@ -175,10 +176,16 @@ through `fly ssh console` with their own Fly account.
 
 Real secrets live in two places only: Fly app secrets and the GitHub
 `production` environment (`FLY_API_TOKEN`). The Fly app secrets are
-`BUCKET_NAME` and the `AWS_*` Tigris credentials, plus `GITHUB_APP_WEBHOOK_SECRET` and `ANTHROPIC_API_KEY`
-(`docs/phase-1-human-steps.md`). chuck reads only the webhook secret today;
-the API key is kept for the loop's Claude proxy. The Slack secrets are
-unset by `docs/phase-1-human-steps.md` section 2. `deploy/fly.toml` `[env]`, `Dockerfile` `ENV` and `config/`
+`BUCKET_NAME` and the `AWS_*` Tigris credentials, plus
+`GITHUB_APP_WEBHOOK_SECRET` (`docs/phase-1-human-steps.md` section 1.1) and
+`ANTHROPIC_API_KEY`, which the retired shadow phase set with `fly secrets
+set` and which is kept for the loop's Claude proxy. chuck reads only the
+webhook secret today. The Slack secrets are unset by
+`docs/phase-1-human-steps.md` section 2. The loop's new secrets are listed
+in the delivery loop spec's "Rollout / Phase 0"; their setup steps will
+live in `docs/phase-0-human-steps.md`, which issue #34 writes and which does
+not exist yet. `config/chuck.yaml` names secrets only as
+`${VAR}` references, which `internal/config` enforces. `deploy/fly.toml` `[env]`, `Dockerfile` `ENV` and `config/`
 are committed and baked into the image, so they hold non-secret settings
 only. Local runs are the one exception to the two places: a developer's
 credentials (the dev GitHub App's webhook secret) sit in a `.env` at the
