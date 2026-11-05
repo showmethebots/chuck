@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"reflect"
 	"regexp"
 	"strings"
 	"time"
@@ -82,6 +83,9 @@ var (
 // A repo whose file fails here shows as "config invalid" and launches
 // nothing.
 func ParseLoop(b []byte) (*Loop, error) {
+	if err := checkJSONKeys(b, reflect.TypeOf(Loop{})); err != nil {
+		return nil, fmt.Errorf("%s: %w", LoopFile, err)
+	}
 	var l Loop
 	dec := json.NewDecoder(bytes.NewReader(b))
 	dec.DisallowUnknownFields()

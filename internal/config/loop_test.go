@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -42,7 +43,7 @@ func TestValidFixturesParse(t *testing.T) {
 }
 
 func TestInvalidFixturesFail(t *testing.T) {
-	files, _ := filepath.Glob("testdata/loop/invalid/*.json")
+	files, _ := filepath.Glob("testdata/loop/invalid*/*.json")
 	if len(files) == 0 {
 		t.Fatal("no invalid fixtures")
 	}
@@ -56,6 +57,9 @@ func TestInvalidFixturesFail(t *testing.T) {
 // The shipped JSON Schema is for consumers' editors and CI; chuck's own
 // validator is the one that decides. They must agree on every fixture, or
 // a consumer's CI passes a file chuck then refuses (or the reverse).
+// invalid-go-only holds what a schema cannot express (a repeated key,
+// since a parsed instance has already dropped it); chuck alone rejects
+// those.
 func TestSchemaAgreesWithValidator(t *testing.T) {
 	c := jsonschema.NewCompiler()
 	sch, err := c.Compile("../../config/loop.schema.json")
@@ -99,6 +103,23 @@ func TestEveryProblemReportedTogether(t *testing.T) {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error does not mention %s:\n%v", want, err)
 		}
+	}
+}
+
+// encoding/json alone would let "AUTO_MERGE": true or a second
+// "auto_merge" override a visible "auto_merge": false.
+func TestKeysAreExactAndUnique(t *testing.T) {
+	for _, f := range []string{"invalid/case-variant-key.json", "invalid-go-only/duplicate-key.json"} {
+		_, err := ParseLoop(readFixture(t, filepath.Join("testdata", "loop", f)))
+		if err == nil {
+			t.Errorf("%s: parsed", f)
+		}
+	}
+	nested := `{"limits": {"build_attempts": 1, "Build_Attempts": 9}, "models": {"default": "claude-a", "default": "claude-b"}}`
+	err := checkJSONKeys([]byte(nested), reflect.TypeOf(Loop{}))
+	if err == nil || !strings.Contains(err.Error(), "limits.Build_Attempts: unknown field") ||
+		!strings.Contains(err.Error(), "models.default: key appears more than once") {
+		t.Fatalf("nested: %v", err)
 	}
 }
 
@@ -185,7 +206,7 @@ func TestLoopConfigIsAlwaysARiskPath(t *testing.T) {
 }
 
 func TestCompileGlob(t *testing.T) {
-	for _, bad := range []string{"", "/a", "a/**b", "a//b", "a/{b,c}", "a/[bc]"} {
+	for _, bad := range []string{"", "/a", "a/**b", "a//b", "a/{b,c}", "a/[bc]", "./a", "a/../b"} {
 		if _, err := compileGlob(bad); err == nil {
 			t.Errorf("compileGlob(%q) accepted", bad)
 		}

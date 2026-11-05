@@ -42,6 +42,10 @@ func compileGlob(g string) (*regexp.Regexp, error) {
 			return nil, fmt.Errorf("%q: ** must be a whole path segment", g)
 		case seg == "":
 			return nil, fmt.Errorf("%q: empty path segment", g)
+		case seg == "." || seg == "..":
+			// GitHub reports changed files as clean paths, so a pattern
+			// with . or .. could never match one.
+			return nil, fmt.Errorf("%q: . and .. segments never match a changed file", g)
 		default:
 			for _, r := range seg {
 				switch r {
