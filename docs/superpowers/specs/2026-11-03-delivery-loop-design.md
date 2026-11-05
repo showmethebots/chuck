@@ -144,11 +144,12 @@ transitions  id, item_id, from_state, to_state, input_kind, input_ref,
              -- input_kind: webhook|verdict|dashboard|tick
              -- actor: GitHub login for dashboard actions, 'chuck' otherwise
              -- effects_json: the effect list with each result
-runs         id, item_id, stage, attempt, status,
+runs         id, item_id, stage, attempt, status, reason,
              -- launching|running|finished|failed|cancelled|timed_out
+             -- reason: why it ended, e.g. credits, timeout
              machine_id, machine_region, image, model,
              credential ('api_key'|'oauth'), prompt, schema_name, ref,
-             token_hash, deadline_at, started_at, callback_at, destroyed_at, exit_code,
+             token_hash, created_at, deadline_at, started_at, callback_at, destroyed_at, exit_code,
              cost_usd, input_tokens, output_tokens, duration_ms,
              verdict_json, log_tail
 evidence     id, run_id, path, content_type, bytes, sha256, content BLOB,
@@ -156,6 +157,7 @@ evidence     id, run_id, path, content_type, bytes, sha256, content BLOB,
 webhooks     id, delivery_id UNIQUE, event, action, repo, sender_id,
              sender_login, payload, received_at, handled_at, result
 sessions     id, user_id, login, csrf, created_at, expires_at, revoked_at
+             -- id: sha256 of the cookie value, like runs.token_hash
 spend        month, repo_id, credential, usd, runs
 settings     key, value            -- e.g. api_key_exhausted_until
 ```

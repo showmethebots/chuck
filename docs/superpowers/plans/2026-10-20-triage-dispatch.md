@@ -366,7 +366,7 @@
 
 - [ ] **Step 1: Write failing tests**
 
-  - `TestTaskPostLeadsWithTaskAndAsk`: a view with `Task: "address_review", WouldDo: "none", Target: "https://github.com/orionsbelt-dev/demos/pull/1", Ask: "reviewer says the backoff never resets", Rationale: "concrete bug with a suggested fix", PostKind: PostGrade`. The rendered JSON contains:
+  - `TestTaskPostLeadsWithTaskAndAsk`: a view with `Task: "address_review", WouldDo: "none", Target: "https://github.com/showmethebots/demos/pull/1", Ask: "reviewer says the backoff never resets", Rationale: "concrete bug with a suggested fix", PostKind: PostGrade`. The rendered JSON contains:
     - `chuck would hand this to a worker: `+"`address_review`"
     - `pull/1`
     - `*Ask:* reviewer says the backoff never resets`

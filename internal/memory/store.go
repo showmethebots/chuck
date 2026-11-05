@@ -144,3 +144,42 @@ func ts(t time.Time) string { return t.UTC().Format(tsFormat) }
 func parseTS(s string) (time.Time, error) { return time.Parse(tsFormat, s) }
 
 func now() string { return ts(time.Now()) }
+
+// nullTS stores the zero time as NULL.
+func nullTS(t time.Time) any {
+	if t.IsZero() {
+		return nil
+	}
+	return ts(t)
+}
+
+// scanTS parses a nullable timestamp column; NULL is the zero time.
+func scanTS(ns sql.NullString) (time.Time, error) {
+	if !ns.Valid {
+		return time.Time{}, nil
+	}
+	return parseTS(ns.String)
+}
+
+func nullStr(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
+}
+
+// month is the spend table's key for t: the UTC calendar month.
+func month(t time.Time) string { return t.UTC().Format("2006-01") }
+
+// inTx runs f in a transaction and commits only if f returns nil.
+func (s *Store) inTx(ctx context.Context, f func(*sql.Tx) error) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	if err := f(tx); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	return tx.Commit()
+}

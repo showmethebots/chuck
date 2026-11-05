@@ -1,10 +1,10 @@
 {
   "ref": "refs/heads/main",
-  "compare": "https://github.com/orionsbelt-dev/demos/compare/abc123...def456",
+  "compare": "https://github.com/showmethebots/demos/compare/abc123...def456",
   "commits": [
     {"message": "Fix refresh 404\n\nServe index.html for unknown paths."},
     {"message": "Add test"}
   ],
-  "repository": {"full_name": "orionsbelt-dev/demos"},
+  "repository": {"full_name": "showmethebots/demos"},
   "sender": {"login": "cwinters8", "type": "User"}
 }

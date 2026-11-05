@@ -4,9 +4,9 @@
     "number": 7,
     "title": "Demo page 404s on refresh",
     "body": "Steps: open /demo, refresh. Expected the page, got a 404.",
-    "html_url": "https://github.com/orionsbelt-dev/demos/issues/7",
+    "html_url": "https://github.com/showmethebots/demos/issues/7",
     "state": "open"
   },
-  "repository": {"full_name": "orionsbelt-dev/demos"},
-  "sender": {"login": "cwinters8", "type": "User"}
+  "repository": {"full_name": "showmethebots/demos"},
+  "sender": {"id": 40615752, "login": "cwinters8", "type": "User"}
 }
