@@ -32,10 +32,10 @@ import (
 
 	"github.com/joho/godotenv"
 
-	"github.com/orionsbelt-dev/chuck/internal/config"
-	"github.com/orionsbelt-dev/chuck/internal/events"
-	"github.com/orionsbelt-dev/chuck/internal/memory"
-	"github.com/orionsbelt-dev/chuck/internal/web"
+	"github.com/showmethebots/chuck/internal/config"
+	"github.com/showmethebots/chuck/internal/events"
+	"github.com/showmethebots/chuck/internal/memory"
+	"github.com/showmethebots/chuck/internal/web"
 )
 
 // version is set at build time with -ldflags "-X main.version=...".

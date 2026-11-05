@@ -13,7 +13,7 @@ const validChuck = `
 humans:
   - id: 1234567
 apps:
-  - owner: orionsbelt-dev
+  - owner: showmethebots
     app_id: ${GITHUB_APP_ID}
     private_key: ${GITHUB_APP_PRIVATE_KEY}
     oauth_client_id: ${GITHUB_OAUTH_CLIENT_ID}

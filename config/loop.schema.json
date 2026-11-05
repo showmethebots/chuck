@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/orionsbelt-dev/chuck/config/loop.schema.json",
+  "$id": "https://github.com/showmethebots/chuck/config/loop.schema.json",
   "title": "chuck loop config",
   "description": "A consumer repo's .claude/loop.json. chuck's own validator (internal/config) is authoritative; this schema is for editors and consumer CI, and a test keeps the two agreeing on chuck's fixtures. JSON Schema cannot see a repeated key, which chuck rejects. Risk-path globs are root-anchored; .claude/** and .github/** are always risk paths.",
   "type": "object",

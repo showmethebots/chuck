@@ -23,7 +23,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/orionsbelt-dev/chuck/internal/memory"
+	"github.com/showmethebots/chuck/internal/memory"
 )
 
 func fixture(t *testing.T, name string) []byte {
