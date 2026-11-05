@@ -99,7 +99,7 @@ func TestWebhookStoresSignedDelivery(t *testing.T) {
 		t.Fatalf("stored %d events, want 1", len(store.events))
 	}
 	e := store.events[0]
-	if e.Event != "issues" || e.Action != "opened" || e.Repo != "orionsbelt-dev/demos" || e.DeliveryID != "d-1" {
+	if e.Event != "issues" || e.Action != "opened" || e.Repo != "showmethebots/demos" || e.DeliveryID != "d-1" {
 		t.Errorf("webhook = %+v", e)
 	}
 	if e.SenderID != 40615752 || e.SenderLogin != "cwinters8" {
@@ -119,9 +119,9 @@ func TestWebhookStoresSignedDelivery(t *testing.T) {
 
 func TestWebhookKinds(t *testing.T) {
 	cases := []struct{ event, file, action, repo string }{
-		{"push", "push.json", "", "orionsbelt-dev/demos"},
+		{"push", "push.json", "", "showmethebots/demos"},
 		{"ping", "ping.json", "", ""},
-		{"workflow_run", "workflow_run_completed.json", "completed", "orionsbelt-dev/demos"},
+		{"workflow_run", "workflow_run_completed.json", "completed", "showmethebots/demos"},
 	}
 	for _, c := range cases {
 		store := &fakeStore{}

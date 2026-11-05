@@ -33,13 +33,13 @@ dataset that Phase 2's router is tested against.
 |---|---|---|
 | Event pipeline | SQLite-backed queue: webhook stores raw event and returns 202; an in-daemon loop triages | GitHub's 10 s delivery timeout; `pause` needs something to hold back; restarts lose nothing; replay is the same loop |
 | Triage output | Structured JSON validated in code | Replay and Phase 2 need comparable fields; grades attach to a specific claim. Amended 2026-10-20: triage proposes a worker task or an `ask_first` action, see `2026-10-20-triage-dispatch-design.md` |
-| GitHub source | Read-only GitHub Apps, not repo/org webhooks: one private App owned by `orionsbelt-dev`, one owned by `cwinters8`, same webhook URL and secret | Personal accounts have no account-level webhook; a private App installs only on its owner, and a public one could be installed by anyone to feed chuck events; Phase 3 needs Apps for scoped tokens anyway |
-| Sources | App installed on all of `orionsbelt-dev`, plus `cwinters8/agent-ci-kit`, `cwinters8/agent-skills`, `cwinters8/content-workshop` | Measured activity, below |
+| GitHub source | Read-only GitHub Apps, not repo/org webhooks: one private App owned by `showmethebots`, one owned by `cwinters8`, same webhook URL and secret | Personal accounts have no account-level webhook; a private App installs only on its owner, and a public one could be installed by anyone to feed chuck events; Phase 3 needs Apps for scoped tokens anyway |
+| Sources | App installed on all of `showmethebots`, plus `cwinters8/agent-ci-kit`, `cwinters8/agent-skills`, `cwinters8/content-workshop` | Measured activity, below |
 | Shadow scope | Every repo in the App installation is treated as handed off, for would-have-done purposes only | Nothing is handed off yet; harmless because nothing executes |
 | Approvals | `ask_first` would-dos post real approval requests; answers are logged; nothing executes | Exercises the whole approval round-trip at zero risk |
 | Grading | Owner-only 👍/👎 on every would-act decision plus a daily random sample of would-do-nothing decisions | Defines "correct"; keeps grading to roughly 10–20 a day. Amended 2026-10-20: a task decision gets a grade post, an `ask_first` action gets an approval post, see `2026-10-20-triage-dispatch-design.md` |
 | Noise rules | In Go, table-tested | Phase 2's router is where rules move to YAML; designing the format now would mean doing it twice |
-| Dev/test repo | `orionsbelt-dev/demos` | It is the Phase 3 pilot; near-zero natural traffic, so test traffic there is deliberate |
+| Dev/test repo | `showmethebots/demos` | It is the Phase 3 pilot; near-zero natural traffic, so test traffic there is deliberate |
 | Migrations | New `0002_shadow.sql`; `0001_boots.sql` stays as shipped | The runner tracks migrations by filename, so an edited 0001 never re-runs on production and schemas would silently diverge |
 | `resume` | Added, owner-only | The Notion design has `pause`/`kill` but no way back; members can stop chuck but not restart it |
 
@@ -58,9 +58,9 @@ are the reliable ones.
 | cwinters8/sprite-locker | 4/0 | 8/0 | 85/0 | 35/0 | 0/0 | 0/0 |
 | cwinters8/agent-skills-testbed | 1/0 | 0/0 | 1/0 | 52/31 | 0/0 | 0/0 |
 | cwinters8/agent-server | 1/0 | 0/0 | 0/0 | 0/0 | 0/0 | 0/0 |
-| orionsbelt-dev/chuck | 2/2 | 0/0 | 1/1 | 5/5 | 2/2 | 0/0 |
-| orionsbelt-dev/marketing | 0/0 | 0/0 | 0/0 | 5/5 | 3/3 | 0/0 |
-| orionsbelt-dev/demos | 1/1 | 0/0 | 0/0 | 0/0 | 0/0 | 0/0 |
+| showmethebots/chuck | 2/2 | 0/0 | 1/1 | 5/5 | 2/2 | 0/0 |
+| showmethebots/marketing | 0/0 | 0/0 | 0/0 | 5/5 | 3/3 | 0/0 |
+| showmethebots/demos | 1/1 | 0/0 | 0/0 | 0/0 | 0/0 | 0/0 |
 
 Roughly 300 deliveries a week before CI. About half of all comments are from
 `chatgpt-codex-connector[bot]`. Volume is not the constraint; grading load
@@ -361,7 +361,7 @@ not in a README, written as implementation reaches the point where each step
 is needed. Each step is announced to Clark when the code it depends on is
 ready, not before.
 
-- **Two private production GitHub Apps**, one owned by `orionsbelt-dev`
+- **Two private production GitHub Apps**, one owned by `showmethebots`
   (installed on all its repositories) and one owned by `cwinters8`
   (installed on agent-ci-kit, agent-skills, content-workshop). Both: webhook
   URL `https://chuck.fly.dev/webhooks/github`, the same webhook secret.
@@ -370,9 +370,9 @@ ready, not before.
   Issues, Issue comment, Push, Workflow run. Not Check run, Check suite or
   Status, which multiply CI noise. App names are global on GitHub, so they
   need distinct names.
-- **A private dev GitHub App** owned by `orionsbelt-dev`: same settings,
+- **A private dev GitHub App** owned by `showmethebots`: same settings,
   webhook URL is a `cloudflared` quick-tunnel URL to the laptop, its own
-  secret, installed on `orionsbelt-dev/demos` only.
+  secret, installed on `showmethebots/demos` only.
 - **Slack apps `chuck` and `chuck-dev`**: Socket Mode on, interactivity on,
   slash command `/chuck` (dev: `/chuck-dev`), bot scopes `chat:write` and
   `commands`. Invite each to its channels.
