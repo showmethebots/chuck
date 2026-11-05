@@ -195,6 +195,11 @@ func (v *Verdict) check() error {
 		if v.Validate.Outcome == "pass" && len(v.Validate.Criteria) == 0 {
 			bad("outcome pass with no criteria reported")
 		}
+		// e2e_command is required in loop.json, so a pass always has at
+		// least the suite to report.
+		if v.Validate.Outcome == "pass" && len(v.Validate.Regressions) == 0 {
+			bad("outcome pass with no regressions reported")
+		}
 		if v.Validate.Outcome == "pass" {
 			for _, r := range append(append([]Result(nil), v.Validate.Criteria...), v.Validate.Regressions...) {
 				if r.Result != "pass" {

@@ -43,6 +43,9 @@ type Context struct {
 	// Build and sweep: the feedback chuck decided counts. Comments from
 	// anyone else never reach the prompt.
 	Feedback []Feedback
+
+	// Build: what earlier attempts reported, from their runs' verdicts.
+	EarlierAttempts []string
 }
 
 // Feedback is one comment from a trusted author.
@@ -109,6 +112,15 @@ func Prompt(s config.Stage, c Context) (string, error) {
 			b.WriteString(fence(strings.Join(c.Smoke, "\n")))
 		}
 	case config.StageBuild, config.StageSweep:
+		if s == config.StageBuild {
+			b.WriteString("\n### Earlier attempts\n\n")
+			if len(c.EarlierAttempts) == 0 {
+				b.WriteString("None.\n")
+			}
+			for i, a := range c.EarlierAttempts {
+				fmt.Fprintf(&b, "Attempt %d:\n\n%s\n", i+1, fence(a))
+			}
+		}
 		b.WriteString("\n### Feedback to act on\n\n")
 		if len(c.Feedback) == 0 {
 			b.WriteString("None.\n")

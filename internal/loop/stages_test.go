@@ -105,6 +105,7 @@ func TestParseVerdictRejects(t *testing.T) {
 		{"duplicate criterion", config.StageValidate, `{"outcome":"fail","summary":"","tested_sha":` + sha + `,"criteria":[{"id":"AC-1","result":"pass","evidence":[],"notes":""},{"id":"AC-1","result":"fail","evidence":[],"notes":""}],"regressions":[]}`, "AC-1 is reported twice"},
 		{"pass that is not", config.StageValidate, `{"outcome":"pass","summary":"","tested_sha":` + sha + `,"criteria":[{"id":"AC-1","result":"undetermined","evidence":[],"notes":""}],"regressions":[]}`, "AC-1 is undetermined"},
 		{"pass with no criteria", config.StageValidate, `{"outcome":"pass","summary":"","tested_sha":` + sha + `,"criteria":[],"regressions":[]}`, "no criteria"},
+		{"pass with no regressions", config.StageValidate, `{"outcome":"pass","summary":"","tested_sha":` + sha + `,"criteria":[{"id":"AC-1","result":"pass","evidence":[],"notes":""}],"regressions":[]}`, "no regressions"},
 		{"javascript url", config.StageReview, `{"outcome":"posted","summary":"","reviewed_sha":` + sha + `,"comment_url":"javascript:alert(1)","findings_count":0,"skills_not_run":[]}`, "comment_url"},
 		{"overlong summary", config.StageReview, `{"outcome":"posted","summary":"` + strings.Repeat("x", 2001) + `","reviewed_sha":` + sha + `,"comment_url":"","findings_count":0,"skills_not_run":[]}`, "summary"},
 	}
@@ -124,9 +125,10 @@ func fullContext() Context {
 		Repo: "showmethebots/demos", Issue: 12, PR: 13, Attempt: 2,
 		Branch: "loop/issue-12-empty-state", SHA: "0123456789abcdef0123456789abcdef01234567",
 		DevURL: "https://demos-dev.example.com", Setup: "npm ci", E2ECommand: "npx playwright test",
-		Smoke:      []string{"home page loads"},
-		SuiteTests: []string{"#4 AC-1: shows the banner"},
-		Feedback:   []Feedback{{Author: "cwinters8", URL: "https://github.com/o/r/pull/13#issuecomment-9", Body: "Please rename the helper."}},
+		Smoke:           []string{"home page loads"},
+		SuiteTests:      []string{"#4 AC-1: shows the banner"},
+		Feedback:        []Feedback{{Author: "cwinters8", URL: "https://github.com/o/r/pull/13#issuecomment-9", Body: "Please rename the helper."}},
+		EarlierAttempts: []string{"blocked: tests time out on CI"},
 	}
 }
 
@@ -135,7 +137,7 @@ func TestEveryPromptRendersWithContext(t *testing.T) {
 	common := []string{"## Context", "- Repository: showmethebots/demos", "- Issue: #12", "- Pull request: #13", "loop mode"}
 	extra := map[config.Stage][]string{
 		config.StageIntake:   {"- Attempt: 2", "### End-to-end tests in the suite", "#4 AC-1: shows the banner", "Supersedes: #N AC-n"},
-		config.StageBuild:    {"- Attempt: 2", "- Branch: `loop/issue-12-empty-state`", "### Feedback to act on", "From @cwinters8", "Please rename the helper.", "Retire every test a `Supersedes"},
+		config.StageBuild:    {"- Attempt: 2", "- Branch: `loop/issue-12-empty-state`", "### Feedback to act on", "From @cwinters8", "Please rename the helper.", "Retire every test a `Supersedes", "### Earlier attempts", "Attempt 1:", "tests time out on CI"},
 		config.StageReview:   {"- Review round: 2", "pr-review", "provenance"},
 		config.StageSweep:    {"- Review round: 2", "### Feedback to act on", "Please rename the helper."},
 		config.StageValidate: {"- Attempt: 2", "- Dev deployment: https://demos-dev.example.com (commit 0123456789abcdef0123456789abcdef01234567)", "npm ci", "npx playwright test", "home page loads"},
@@ -156,6 +158,12 @@ func TestEveryPromptRendersWithContext(t *testing.T) {
 		// Only the stages that act on feedback ever see it.
 		if s != config.StageBuild && s != config.StageSweep && strings.Contains(p, "rename the helper") {
 			t.Errorf("%s: feedback leaked into the prompt", s)
+		}
+		if s != config.StageBuild && strings.Contains(p, "tests time out") {
+			t.Errorf("%s: earlier attempts leaked into the prompt", s)
+		}
+		if strings.Contains(p, "comments on the\n  issue. Read them") {
+			t.Errorf("%s: prompt sends the worker to unfiltered issue comments", s)
 		}
 	}
 	if _, err := Prompt("deploy", c); err == nil {
