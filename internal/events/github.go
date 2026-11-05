@@ -35,6 +35,10 @@ const defaultBodyTimeout = 10 * time.Second
 // because GitHub does not retry failed App deliveries.
 const maxInFlight = 2
 
+// ResultNoLoop is the result recorded on deliveries received before the
+// loop reads them.
+const ResultNoLoop = "stored; no loop yet"
+
 // GitHubStore is the part of memory.Store the webhook needs.
 type GitHubStore interface {
 	InsertWebhook(ctx context.Context, w memory.Webhook) (int64, bool, error)
@@ -125,6 +129,11 @@ func (g *GitHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if meta.Action != "" {
 		kind += "." + meta.Action
 	}
+	// Nothing reads deliveries until the loop lands (#25), so each is stored
+	// as already handled. Otherwise the loop's first boot would replay every
+	// delivery since this deploy as work a crash left behind. #25 removes
+	// HandledAt and Result here.
+	at := g.now()
 	id, inserted, err := g.Store.InsertWebhook(r.Context(), memory.Webhook{
 		DeliveryID:  delivery,
 		Event:       name,
@@ -133,7 +142,9 @@ func (g *GitHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		SenderID:    meta.Sender.ID,
 		SenderLogin: meta.Sender.Login,
 		Payload:     body,
-		ReceivedAt:  g.now(),
+		ReceivedAt:  at,
+		HandledAt:   at,
+		Result:      ResultNoLoop,
 	})
 	if err != nil {
 		g.Log.Error("store github webhook", "delivery", delivery, "err", err.Error())

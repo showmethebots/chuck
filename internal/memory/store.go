@@ -145,6 +145,14 @@ func parseTS(s string) (time.Time, error) { return time.Parse(tsFormat, s) }
 
 func now() string { return ts(time.Now()) }
 
+// nullTS stores the zero time as NULL.
+func nullTS(t time.Time) any {
+	if t.IsZero() {
+		return nil
+	}
+	return ts(t)
+}
+
 // scanTS parses a nullable timestamp column; NULL is the zero time.
 func scanTS(ns sql.NullString) (time.Time, error) {
 	if !ns.Valid {

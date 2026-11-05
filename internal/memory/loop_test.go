@@ -370,6 +370,11 @@ func TestWebhookDedupeHandledAndRetention(t *testing.T) {
 	if _, _, err := s.InsertWebhook(ctx, old); err != nil {
 		t.Fatal(err)
 	}
+	pre := w
+	pre.DeliveryID, pre.HandledAt, pre.Result = "d-pre", t0, "stored; no loop yet"
+	if _, _, err := s.InsertWebhook(ctx, pre); err != nil {
+		t.Fatal(err)
+	}
 	un, err := s.UnhandledWebhooks(ctx, 10)
 	if err != nil || len(un) != 2 {
 		t.Fatalf("unhandled = %d, %v", len(un), err)

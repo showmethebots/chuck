@@ -23,16 +23,18 @@ type Webhook struct {
 }
 
 // InsertWebhook stores w and reports whether it was new. A delivery id
-// seen before is a no-op, not an error: GitHub redelivers.
+// seen before is a no-op, not an error: GitHub redelivers. A non-zero
+// HandledAt stores the delivery as already handled, with Result.
 func (s *Store) InsertWebhook(ctx context.Context, w Webhook) (id int64, inserted bool, err error) {
 	if w.ReceivedAt.IsZero() {
 		w.ReceivedAt = time.Now()
 	}
 	err = s.db.QueryRowContext(ctx, `INSERT INTO webhooks
-		(delivery_id, event, action, repo, sender_id, sender_login, payload, received_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		(delivery_id, event, action, repo, sender_id, sender_login, payload, received_at, handled_at, result)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (delivery_id) DO NOTHING RETURNING id`,
-		w.DeliveryID, w.Event, w.Action, w.Repo, w.SenderID, w.SenderLogin, w.Payload, ts(w.ReceivedAt)).Scan(&id)
+		w.DeliveryID, w.Event, w.Action, w.Repo, w.SenderID, w.SenderLogin, w.Payload, ts(w.ReceivedAt),
+		nullTS(w.HandledAt), w.Result).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, false, nil
 	}

@@ -111,6 +111,10 @@ func TestWebhookStoresSignedDelivery(t *testing.T) {
 	if !e.ReceivedAt.Equal(fixedNow) {
 		t.Errorf("ReceivedAt = %v", e.ReceivedAt)
 	}
+	// Until the loop reads deliveries, none may be left for it to replay.
+	if !e.HandledAt.Equal(fixedNow) || e.Result != ResultNoLoop {
+		t.Errorf("handled = %v %q, want stored as handled", e.HandledAt, e.Result)
+	}
 }
 
 func TestWebhookKinds(t *testing.T) {
