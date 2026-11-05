@@ -55,9 +55,10 @@ curl -s https://chuck.fly.dev/healthz
 8. Create. GitHub won't install an App until it has a private key, so click
    **generate a private key** in the banner (or **General** → **Private
    keys** → **Generate a private key**). It downloads a `.pem` file. Delete
-   it: chuck makes no GitHub API calls in Phase 1, and anyone holding the key
+   it: chuck makes no GitHub API calls yet, and anyone holding the key
    can read every repository the App is installed on. Don't give it to Fly or
-   save it anywhere. When a later phase needs the API, generate a new one.
+   save it anywhere. The loop's setup (`docs/phase-0-human-steps.md`, once
+   written) generates a new one for chuck.
 9. **Install App** → `orionsbelt-dev` → **All repositories**.
 
 ### 1.3 Create the `cwinters8` App

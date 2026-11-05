@@ -15,6 +15,13 @@ true, not before.
   reports every problem at once through `errors.Join`. A new config field
   needs a validation rule and a test. Validation must keep collecting
   errors rather than stopping at the first.
+- **`config/chuck.yaml` holds no secrets.** `private_key` and
+  `oauth_client_secret` may only be `${VAR}` references, and validation
+  errors never quote a resolved value.
+- **`loop.json` is a risk path.** `.claude/**` and `.github/**` are risk
+  paths in every repo whatever its `risk_paths` lists (`alwaysRisk` in
+  `internal/config`), so no repo can configure its way to auto-merging a
+  change to its own loop config or workflows.
 - **Shipped migrations are immutable.** To change the schema, add a new file
   under `internal/memory/migrations/`. Never edit one that has shipped.
 - **SQLite runs in WAL mode with a single connection.** Litestream only

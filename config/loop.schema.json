@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/orionsbelt-dev/chuck/config/loop.schema.json",
+  "title": "chuck loop config",
+  "description": "A consumer repo's .claude/loop.json. chuck's own validator (internal/config) is authoritative; this schema is for editors and consumer CI, and a test keeps the two agreeing on chuck's fixtures. Risk-path globs are root-anchored; .claude/** and .github/** are always risk paths.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["default_branch", "wip_limit", "merge_method", "limits", "models", "max_turns", "machines", "deploy", "validate"],
+  "$defs": {
+    "stageKey": { "enum": ["default", "intake", "build", "review", "sweep", "validate"] },
+    "duration": { "type": "string", "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$" }
+  },
+  "properties": {
+    "default_branch": { "type": "string", "pattern": "^[A-Za-z0-9._/-]+$" },
+    "wip_limit": { "type": "integer", "minimum": 1 },
+    "merge_method": { "enum": ["MERGE", "SQUASH", "REBASE"] },
+    "auto_advance": { "type": "boolean" },
+    "auto_merge": { "type": "boolean" },
+    "auto_promote": { "type": "boolean" },
+    "ratchet": { "type": "boolean" },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["build_attempts", "review_rounds", "stale_hours"],
+      "properties": {
+        "build_attempts": { "type": "integer", "minimum": 1 },
+        "review_rounds": { "type": "integer", "minimum": 1 },
+        "stale_hours": { "type": "integer", "minimum": 1 },
+        "wall_clock": {
+          "type": "object",
+          "propertyNames": { "$ref": "#/$defs/stageKey" },
+          "additionalProperties": { "$ref": "#/$defs/duration" }
+        }
+      }
+    },
+    "models": {
+      "type": "object",
+      "required": ["default"],
+      "propertyNames": { "$ref": "#/$defs/stageKey" },
+      "additionalProperties": { "type": "string", "pattern": "^claude-[a-z0-9-]+$" }
+    },
+    "max_turns": {
+      "type": "object",
+      "required": ["default"],
+      "propertyNames": { "$ref": "#/$defs/stageKey" },
+      "additionalProperties": { "type": "integer", "minimum": 1 }
+    },
+    "machines": {
+      "type": "object",
+      "required": ["default"],
+      "propertyNames": { "$ref": "#/$defs/stageKey" },
+      "additionalProperties": { "type": "string", "pattern": "^(shared|performance)-cpu-[0-9]+x:[0-9]+$" }
+    },
+    "risk_paths": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1, "pattern": "^[^/\\[\\]{}\\\\][^\\[\\]{}\\\\]*$" }
+    },
+    "deploy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dev_url", "dev_workflow", "prod_workflow"],
+      "properties": {
+        "dev_url": { "type": "string", "pattern": "^https://[^/]+" },
+        "dev_workflow": { "type": "string", "minLength": 1 },
+        "prod_workflow": { "type": "string", "minLength": 1 }
+      }
+    },
+    "validate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["e2e_command"],
+      "properties": {
+        "setup": { "type": "string" },
+        "e2e_command": { "type": "string", "pattern": "\\S" },
+        "smoke": { "type": "array", "items": { "type": "string", "pattern": "\\S" } }
+      }
+    }
+  }
+}

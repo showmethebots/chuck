@@ -19,11 +19,12 @@ packages land.
 ## Layout
 
 ```text
-cmd/chuck/          entrypoint: `run` (server), `validate` (config check)
+cmd/chuck/          entrypoint: `run` (server), `validate` (config and loop.json check)
+internal/config/    config/chuck.yaml and per-repo .claude/loop.json: strict decoding, validation
 internal/memory/    SQLite state (WAL, embedded migrations)
 internal/events/    GitHub webhook receiver
 internal/web/       HTTP server: /healthz, the webhook mount, heartbeat
-config/             chuck-wide config, changed by PR (config/chuck.yaml lands with the loop)
+config/             chuck.yaml (chuck-wide, changed by PR) and loop.schema.json (for consumers)
 deploy/             fly.toml, Litestream config, entrypoint, worker image, restore check
 docs/               human steps, specs and plans
 ```
