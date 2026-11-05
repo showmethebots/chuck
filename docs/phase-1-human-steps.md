@@ -32,7 +32,7 @@ curl -s https://chuck.fly.dev/healthz
 ### 1.2 Create the `showmethebots` App
 
 1. Open https://github.com/organizations/showmethebots/settings/apps/new
-2. **GitHub App name:** `chuck-orion`
+2. **GitHub App name:** `chuck-showme-bot`
 3. **Homepage URL:** `https://github.com/showmethebots/chuck`
 4. **Webhook:** Active. **Webhook URL:** `https://chuck.fly.dev/webhooks/github`.
    **Webhook secret:** the value from 1.1.
@@ -87,7 +87,7 @@ Only needed to run chuck on your laptop against real GitHub traffic.
 2. In the ngrok dashboard → **Domains**, claim the free static domain
    (`….ngrok-free.app`). It stays the same across sessions.
 3. Start the tunnel: `ngrok http --url=<your-domain> 8080`.
-4. Same as 1.2 with: name `chuck-orion-dev`; **Webhook URL**
+4. Same as 1.2 with: name `chuck-showme-bot-dev`; **Webhook URL**
    `https://<your-domain>/webhooks/github`, not the production URL; a
    **new** secret from `openssl rand -hex 32` (put it in your local `.env`,
    copied from `.env.example`, as `GITHUB_APP_WEBHOOK_SECRET`); and
