@@ -1,0 +1,1 @@
+{"outcome":"ready_for_approval","summary":"Two criteria.","criteria_ids":["AC-1","AC-2"],"sub_issues":[],"supersedes":[{"criterion":"AC-2","test":"#4 AC-1"}],"questions":[]}

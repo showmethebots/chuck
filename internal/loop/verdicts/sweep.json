@@ -1,0 +1,26 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["outcome", "summary", "head_sha", "findings", "blockers"],
+  "properties": {
+    "outcome": { "enum": ["ready", "changes_pushed", "cap_reached", "blocked"] },
+    "summary": { "type": "string", "maxLength": 2000 },
+    "head_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["category", "severity", "status", "summary"],
+        "properties": {
+          "category": { "enum": ["correctness", "security", "tests", "docs", "ci", "style", "other"] },
+          "severity": { "enum": ["high", "medium", "low"] },
+          "status": { "enum": ["fixed", "declined", "open"] },
+          "summary": { "type": "string", "maxLength": 500 },
+          "url": { "type": "string", "maxLength": 500, "pattern": "^https://[^\\s]+$" }
+        }
+      }
+    },
+    "blockers": { "type": "array", "items": { "type": "string", "maxLength": 1000 } }
+  }
+}

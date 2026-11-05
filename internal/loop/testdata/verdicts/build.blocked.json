@@ -1,0 +1,1 @@
+{"outcome":"blocked","summary":"Stuck.","pr_number":null,"tests_added":[],"tests_retired":[],"blockers":["AC-2 contradicts the API"],"skills_not_run":["security-review"]}
