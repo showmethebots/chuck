@@ -7,7 +7,6 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -42,12 +41,12 @@ func sign(secret, body []byte) string {
 }
 
 type fakeStore struct {
-	events []memory.Event
+	events []memory.Webhook
 	seen   map[string]bool
 	err    error
 }
 
-func (f *fakeStore) InsertEvent(_ context.Context, e memory.Event) (int64, bool, error) {
+func (f *fakeStore) InsertWebhook(_ context.Context, e memory.Webhook) (int64, bool, error) {
 	if f.err != nil {
 		return 0, false, f.err
 	}
@@ -100,8 +99,11 @@ func TestWebhookStoresSignedDelivery(t *testing.T) {
 		t.Fatalf("stored %d events, want 1", len(store.events))
 	}
 	e := store.events[0]
-	if e.Source != memory.SourceGitHub || e.Kind != "issues.opened" || e.Repo != "orionsbelt-dev/demos" || e.DeliveryID != "d-1" {
-		t.Errorf("event = %+v", e)
+	if e.Event != "issues" || e.Action != "opened" || e.Repo != "orionsbelt-dev/demos" || e.DeliveryID != "d-1" {
+		t.Errorf("webhook = %+v", e)
+	}
+	if e.SenderID != 40615752 || e.SenderLogin != "cwinters8" {
+		t.Errorf("sender = %d %q", e.SenderID, e.SenderLogin)
 	}
 	if !bytes.Equal(e.Payload, body) {
 		t.Error("payload not stored verbatim")
@@ -109,23 +111,13 @@ func TestWebhookStoresSignedDelivery(t *testing.T) {
 	if !e.ReceivedAt.Equal(fixedNow) {
 		t.Errorf("ReceivedAt = %v", e.ReceivedAt)
 	}
-	var headers map[string][]string
-	if err := json.Unmarshal(e.Headers, &headers); err != nil {
-		t.Fatalf("headers not JSON: %v", err)
-	}
-	if _, ok := headers["X-Hub-Signature-256"]; ok {
-		t.Error("signature header was stored")
-	}
-	if headers["X-Github-Delivery"][0] != "d-1" {
-		t.Errorf("delivery header missing: %v", headers)
-	}
 }
 
 func TestWebhookKinds(t *testing.T) {
-	cases := []struct{ event, file, kind, repo string }{
-		{"push", "push.json", "push", "orionsbelt-dev/demos"},
-		{"ping", "ping.json", "ping", ""},
-		{"workflow_run", "workflow_run_completed.json", "workflow_run.completed", "orionsbelt-dev/demos"},
+	cases := []struct{ event, file, action, repo string }{
+		{"push", "push.json", "", "orionsbelt-dev/demos"},
+		{"ping", "ping.json", "", ""},
+		{"workflow_run", "workflow_run_completed.json", "completed", "orionsbelt-dev/demos"},
 	}
 	for _, c := range cases {
 		store := &fakeStore{}
@@ -134,8 +126,8 @@ func TestWebhookKinds(t *testing.T) {
 		if w.Code != http.StatusAccepted || len(store.events) != 1 {
 			t.Fatalf("%s: status %d, %d events", c.event, w.Code, len(store.events))
 		}
-		if got := store.events[0]; got.Kind != c.kind || got.Repo != c.repo {
-			t.Errorf("%s: kind=%q repo=%q, want %q %q", c.event, got.Kind, got.Repo, c.kind, c.repo)
+		if got := store.events[0]; got.Event != c.event || got.Action != c.action || got.Repo != c.repo {
+			t.Errorf("%s: event=%q action=%q repo=%q, want %q %q", c.event, got.Event, got.Action, got.Repo, c.action, c.repo)
 		}
 	}
 }

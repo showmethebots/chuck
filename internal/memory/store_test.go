@@ -4,6 +4,7 @@ import (
 	"context"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func openTemp(t *testing.T, path string) *Store {
@@ -91,5 +92,26 @@ func TestPreviousBootVersion(t *testing.T) {
 		if got != st.want {
 			t.Errorf("boot %d (%s): PreviousBootVersion = %q, want %q", i+1, st.boot, got, st.want)
 		}
+	}
+}
+
+// Review focus: if timestamps did not sort as text, anything ordered or
+// windowed by time would silently misorder.
+func TestTimestampsSortAsText(t *testing.T) {
+	base := time.Date(2026, 10, 13, 12, 0, 5, 0, time.UTC)
+	times := []time.Time{base, base.Add(100 * time.Millisecond), base.Add(time.Second), base.Add(10 * time.Hour)}
+	for i := 1; i < len(times); i++ {
+		if a, b := ts(times[i-1]), ts(times[i]); a >= b {
+			t.Errorf("ts %q does not sort before %q", a, b)
+		}
+	}
+	est := time.FixedZone("EST", -5*3600)
+	if got, want := ts(base.In(est)), ts(base); got != want {
+		t.Errorf("ts in EST = %q, want %q", got, want)
+	}
+	in := base.Add(123456 * time.Microsecond)
+	back, err := parseTS(ts(in))
+	if err != nil || !back.Equal(in) {
+		t.Errorf("round trip = %v, %v; want %v", back, err, in)
 	}
 }

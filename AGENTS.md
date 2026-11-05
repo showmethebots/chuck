@@ -24,6 +24,13 @@ true, not before.
   change to its own loop config or workflows.
 - **Shipped migrations are immutable.** To change the schema, add a new file
   under `internal/memory/migrations/`. Never edit one that has shipped.
+- **`runs` and `evidence` are additive-only.** A worker launched before a
+  deploy can post its verdict after it, so a migration may add a column
+  with a default to those tables but never rename, retype or drop what a
+  worker callback writes.
+- **Tokens are stored hashed.** Run tokens and session cookies live in the
+  database only as sha256 (`memory.HashToken`), so a copy of the database
+  or its Litestream replica holds no usable credential.
 - **SQLite runs in WAL mode with a single connection.** Litestream only
   replicates WAL databases, and `SetMaxOpenConns(1)` avoids `SQLITE_BUSY`
   between the daemon's own connections.

@@ -37,7 +37,7 @@ const maxInFlight = 2
 
 // GitHubStore is the part of memory.Store the webhook needs.
 type GitHubStore interface {
-	InsertEvent(ctx context.Context, e memory.Event) (int64, bool, error)
+	InsertWebhook(ctx context.Context, w memory.Webhook) (int64, bool, error)
 }
 
 // GitHub receives GitHub App webhook deliveries. It verifies the signature,
@@ -112,6 +112,10 @@ func (g *GitHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Repository struct {
 			FullName string `json:"full_name"`
 		} `json:"repository"`
+		Sender struct {
+			ID    int64  `json:"id"`
+			Login string `json:"login"`
+		} `json:"sender"`
 	}
 	if err := json.Unmarshal(body, &meta); err != nil {
 		http.Error(w, "payload is not JSON", http.StatusBadRequest)
@@ -121,30 +125,22 @@ func (g *GitHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if meta.Action != "" {
 		kind += "." + meta.Action
 	}
-	headers := r.Header.Clone()
-	headers.Del("X-Hub-Signature")
-	headers.Del("X-Hub-Signature-256")
-	headerJSON, err := json.Marshal(headers)
-	if err != nil {
-		http.Error(w, "headers", http.StatusInternalServerError)
-		return
-	}
-
-	id, inserted, err := g.Store.InsertEvent(r.Context(), memory.Event{
-		Source:     memory.SourceGitHub,
-		Kind:       kind,
-		DeliveryID: delivery,
-		Repo:       meta.Repository.FullName,
-		Headers:    headerJSON,
-		Payload:    body,
-		ReceivedAt: g.now(),
+	id, inserted, err := g.Store.InsertWebhook(r.Context(), memory.Webhook{
+		DeliveryID:  delivery,
+		Event:       name,
+		Action:      meta.Action,
+		Repo:        meta.Repository.FullName,
+		SenderID:    meta.Sender.ID,
+		SenderLogin: meta.Sender.Login,
+		Payload:     body,
+		ReceivedAt:  g.now(),
 	})
 	if err != nil {
-		g.Log.Error("store github event", "delivery", delivery, "err", err.Error())
+		g.Log.Error("store github webhook", "delivery", delivery, "err", err.Error())
 		http.Error(w, "store failed", http.StatusInternalServerError)
 		return
 	}
-	g.Log.Info("github event", "event_id", id, "kind", kind, "repo", meta.Repository.FullName,
+	g.Log.Info("github webhook", "webhook_id", id, "kind", kind, "repo", meta.Repository.FullName,
 		"delivery", delivery, "duplicate", !inserted)
 	w.WriteHeader(http.StatusAccepted)
 }
