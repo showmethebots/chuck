@@ -16,7 +16,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/orionsbelt-dev/chuck/internal/memory"
+	"github.com/showmethebots/chuck/internal/memory"
 )
 
 // maxBody is GitHub's own cap on a webhook payload.

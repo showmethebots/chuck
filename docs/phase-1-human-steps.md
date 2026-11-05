@@ -10,7 +10,7 @@ own setup is written.
 
 chuck receives GitHub activity through GitHub Apps. A private App can only be
 installed on the account that owns it, so production needs two: one owned by
-`orionsbelt-dev` and one owned by `cwinters8`. Both send to the same URL with
+`showmethebots` and one owned by `cwinters8`. Both send to the same URL with
 the same secret. App names are global on GitHub, so use the names below or
 any free ones.
 
@@ -29,11 +29,11 @@ curl -s https://chuck.fly.dev/healthz
 # "integrations":["github_webhook"]
 ```
 
-### 1.2 Create the `orionsbelt-dev` App
+### 1.2 Create the `showmethebots` App
 
-1. Open https://github.com/organizations/orionsbelt-dev/settings/apps/new
+1. Open https://github.com/organizations/showmethebots/settings/apps/new
 2. **GitHub App name:** `chuck-orion`
-3. **Homepage URL:** `https://github.com/orionsbelt-dev/chuck`
+3. **Homepage URL:** `https://github.com/showmethebots/chuck`
 4. **Webhook:** Active. **Webhook URL:** `https://chuck.fly.dev/webhooks/github`.
    **Webhook secret:** the value from 1.1.
 5. **Repository permissions**, each **Read-only**. Leave everything else at
@@ -59,7 +59,7 @@ curl -s https://chuck.fly.dev/healthz
    can read every repository the App is installed on. Don't give it to Fly or
    save it anywhere. The loop's setup (`docs/phase-0-human-steps.md`, once
    written) generates a new one for chuck.
-9. **Install App** → `orionsbelt-dev` → **All repositories**.
+9. **Install App** → `showmethebots` → **All repositories**.
 
 ### 1.3 Create the `cwinters8` App
 
@@ -91,7 +91,7 @@ Only needed to run chuck on your laptop against real GitHub traffic.
    `https://<your-domain>/webhooks/github`, not the production URL; a
    **new** secret from `openssl rand -hex 32` (put it in your local `.env`,
    copied from `.env.example`, as `GITHUB_APP_WEBHOOK_SECRET`); and
-   **Install** on `orionsbelt-dev` → **Only select repositories** → `demos`.
+   **Install** on `showmethebots` → **Only select repositories** → `demos`.
 5. Run chuck from the repo root with `make run`. Later sessions follow
    "Running locally" in the [README](../README.md#running-locally); the
    Webhook URL does not change.

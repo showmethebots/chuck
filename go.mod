@@ -1,4 +1,4 @@
-module github.com/orionsbelt-dev/chuck
+module github.com/showmethebots/chuck
 
 go 1.27.3
 

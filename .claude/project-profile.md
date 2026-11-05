@@ -8,7 +8,7 @@ current one is `2026-11-03-delivery-loop-design.md`.
 
 ## Repo
 
-`orionsbelt-dev/chuck`, private. Collaborators: `cwinters8` (Clark,
+`showmethebots/chuck` (formerly `orionsbelt-dev/chuck`), private. Collaborators: `cwinters8` (Clark,
 maintainer) and `etho201` (Erik Thomsen, a human account). There are two
 possible reactors, so review-sweep must require an `APPROVED` review and must
 not infer approval from reaction counts.
@@ -159,7 +159,7 @@ own: `GET /healthz` is public through Fly's proxy (`deploy/fly.toml`
 `[http_service]`, `force_https`), and any new route is public unless it
 checks something itself, as `POST /webhooks/github` does with its
 HMAC-SHA256 signature check (see `## Threat model`). GitHub identity is
-two private GitHub Apps in production — one owned by `orionsbelt-dev`, one
+two private GitHub Apps in production — one owned by `showmethebots` (formerly `orionsbelt-dev`), one
 by `cwinters8`, sharing one webhook secret — plus a dev App for local
 testing; all three get read-only repository permissions (Actions, Contents,
 Issues, Metadata, Pull requests). GitHub makes each App generate a private
