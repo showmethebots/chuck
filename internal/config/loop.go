@@ -248,9 +248,23 @@ func (l *Loop) WallClockFor(s Stage, ceiling time.Duration) time.Duration {
 
 // IsRiskPath reports whether a repo-relative path matches a risk path,
 // including the ones every repo has.
+//
+// It fails closed: on a Loop that did not come from ParseLoop the patterns
+// are compiled here, and a pattern that does not compile makes every path
+// a risk path.
 func (l *Loop) IsRiskPath(path string) bool {
 	path = strings.TrimPrefix(path, "/")
-	for _, re := range l.risk {
+	res := l.risk
+	if res == nil {
+		for _, g := range append(append([]string(nil), alwaysRisk...), l.RiskPaths...) {
+			re, err := compileGlob(g)
+			if err != nil {
+				return true
+			}
+			res = append(res, re)
+		}
+	}
+	for _, re := range res {
 		if re.MatchString(path) {
 			return true
 		}

@@ -175,3 +175,16 @@ func TestResolveChecksValues(t *testing.T) {
 		t.Errorf("error quotes the private key value: %v", err)
 	}
 }
+
+// YAML accepts .nan and .inf; a cap that compares false against everything
+// would be no cap at all.
+func TestSpendCapsRejectNaNAndInf(t *testing.T) {
+	for _, v := range []string{".nan", ".inf"} {
+		y := strings.Replace(validChuck, "monthly_usd: 100", "monthly_usd: "+v, 1)
+		y = strings.Replace(y, "per_repo_monthly_usd: 60", "per_repo_monthly_usd: "+v, 1)
+		_, err := ParseChuck([]byte(y))
+		if err == nil || !strings.Contains(err.Error(), "spend.monthly_usd") || !strings.Contains(err.Error(), "spend.per_repo_monthly_usd") {
+			t.Errorf("%s: err = %v", v, err)
+		}
+	}
+}

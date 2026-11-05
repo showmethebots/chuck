@@ -5,6 +5,7 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -140,10 +141,10 @@ func (c *Chuck) validate() error {
 		p.add("workers.wall_clock_ceiling: required, above zero")
 	}
 
-	if c.Spend.MonthlyUSD <= 0 {
+	if !(c.Spend.MonthlyUSD > 0) || math.IsInf(c.Spend.MonthlyUSD, 1) { // also NaN
 		p.add("spend.monthly_usd: required, above zero; there is no unlimited")
 	}
-	if c.Spend.PerRepoMonthlyUSD <= 0 {
+	if !(c.Spend.PerRepoMonthlyUSD > 0) || math.IsInf(c.Spend.PerRepoMonthlyUSD, 1) {
 		p.add("spend.per_repo_monthly_usd: required, above zero; there is no unlimited")
 	}
 	if c.Spend.PerRepoMonthlyUSD > c.Spend.MonthlyUSD && c.Spend.MonthlyUSD > 0 {

@@ -526,7 +526,7 @@ apps:
     oauth_client_secret: ${GITHUB_OAUTH_CLIENT_SECRET}
 workers:
   fly_app: chuck-workers
-  image: registry.fly.io/chuck-workers:sha-...
+  image: ${CHUCK_WORKER_IMAGE}   # set by the deploy job to the image it pushed
   wall_clock_ceiling: 4h
 spend:
   monthly_usd: 100
@@ -651,7 +651,9 @@ GitHub drives one issue from intake to done.
   `orionsbelt-dev` App; permissions raised. New Fly secrets:
   `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY`, `GITHUB_OAUTH_CLIENT_ID`,
   `GITHUB_OAUTH_CLIENT_SECRET`, `FLY_WORKERS_TOKEN`, `ANTHROPIC_API_KEY`,
-  `CLAUDE_CODE_OAUTH_TOKEN`, `CHUCK_SESSION_KEY`.
+  `CLAUDE_CODE_OAUTH_TOKEN`, `CHUCK_SESSION_KEY`, and `CHUCK_WORKER_IMAGE`
+  (not a secret; the deploy job sets it to the worker image built from the
+  same commit).
 - Each consumer repo: a ruleset on the default branch that requires a
   pull request, the CI checks and the `chuck/loop` status, with no bypass
   actors; `CODEOWNERS` covering `.claude/**` and `.github/**` with

@@ -233,3 +233,19 @@ func TestDurationJSON(t *testing.T) {
 		t.Fatal("a bare number was accepted")
 	}
 }
+
+// A Loop built in code rather than by ParseLoop must not treat every path
+// as safe.
+func TestIsRiskPathFailsClosed(t *testing.T) {
+	var l Loop
+	if !l.IsRiskPath(".claude/loop.json") || !l.IsRiskPath(".github/workflows/ci.yml") {
+		t.Error("zero Loop: always-on risk paths not matched")
+	}
+	if l.IsRiskPath("src/app.ts") {
+		t.Error("zero Loop: ordinary path matched")
+	}
+	l.RiskPaths = []string{"db/[bad]"}
+	if !l.IsRiskPath("src/app.ts") {
+		t.Error("uncompilable pattern: want every path treated as a risk path")
+	}
+}

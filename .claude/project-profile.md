@@ -182,8 +182,9 @@ Real secrets live in two places only: Fly app secrets and the GitHub
 set` and which is kept for the loop's Claude proxy. chuck reads only the
 webhook secret today. The Slack secrets are unset by
 `docs/phase-1-human-steps.md` section 2. The loop's new secrets are listed
-in the delivery loop spec's "Rollout / Phase 0" and get their own steps in
-`docs/phase-0-human-steps.md`. `config/chuck.yaml` names secrets only as
+in the delivery loop spec's "Rollout / Phase 0"; their setup steps will
+live in `docs/phase-0-human-steps.md`, which issue #34 writes and which does
+not exist yet. `config/chuck.yaml` names secrets only as
 `${VAR}` references, which `internal/config` enforces. `deploy/fly.toml` `[env]`, `Dockerfile` `ENV` and `config/`
 are committed and baked into the image, so they hold non-secret settings
 only. Local runs are the one exception to the two places: a developer's
