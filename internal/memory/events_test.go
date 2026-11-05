@@ -8,29 +8,6 @@ import (
 	"time"
 )
 
-// insertEvent stores e with defaults filled in and fails the test unless it
-// is a new row.
-func insertEvent(t *testing.T, s *Store, e Event) int64 {
-	t.Helper()
-	if e.Source == "" {
-		e.Source = SourceGitHub
-	}
-	if e.Kind == "" {
-		e.Kind = "issues.opened"
-	}
-	if e.Payload == nil {
-		e.Payload = []byte(`{}`)
-	}
-	id, inserted, err := s.InsertEvent(context.Background(), e)
-	if err != nil {
-		t.Fatalf("InsertEvent: %v", err)
-	}
-	if !inserted {
-		t.Fatal("InsertEvent: row not inserted")
-	}
-	return id
-}
-
 func TestInsertEventDedupesDelivery(t *testing.T) {
 	ctx := context.Background()
 	s := openTemp(t, filepath.Join(t.TempDir(), "state.db"))
@@ -47,62 +24,14 @@ func TestInsertEventDedupesDelivery(t *testing.T) {
 	if inserted {
 		t.Fatal("redelivery inserted a second row")
 	}
-	if n, err := s.QueueDepth(ctx); err != nil || n != 1 {
-		t.Fatalf("QueueDepth = %d, %v; want 1", n, err)
+	var n int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events`).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("events = %d, %v; want 1", n, err)
 	}
 }
 
-func TestCronEventsAreNotQueued(t *testing.T) {
-	ctx := context.Background()
-	s := openTemp(t, filepath.Join(t.TempDir(), "state.db"))
-	defer func() { _ = s.Close() }()
-
-	insertEvent(t, s, Event{Source: SourceCron, Kind: "cron.daily"})
-	insertEvent(t, s, Event{Source: SourceCron, Kind: "cron.daily"})
-	if n, err := s.QueueDepth(ctx); err != nil || n != 0 {
-		t.Fatalf("QueueDepth = %d, %v; want 0", n, err)
-	}
-	if e, err := s.NextUntriaged(ctx, time.Now().Add(time.Hour)); err != nil || e != nil {
-		t.Fatalf("NextUntriaged = %+v, %v; want nil", e, err)
-	}
-}
-
-func TestNextUntriagedOldestFirstAndHonoursRetryTime(t *testing.T) {
-	ctx := context.Background()
-	s := openTemp(t, filepath.Join(t.TempDir(), "state.db"))
-	defer func() { _ = s.Close() }()
-
-	base := time.Date(2026, 10, 13, 12, 0, 0, 0, time.UTC)
-	first := insertEvent(t, s, Event{DeliveryID: "a", ReceivedAt: base})
-	second := insertEvent(t, s, Event{DeliveryID: "b", ReceivedAt: base.Add(time.Second)})
-
-	// Eligible from the moment it is received.
-	got, err := s.NextUntriaged(ctx, base)
-	if err != nil || got == nil || got.ID != first {
-		t.Fatalf("NextUntriaged(base) = %+v, %v; want event %d", got, err, first)
-	}
-	if !got.ReceivedAt.Equal(base) {
-		t.Errorf("ReceivedAt = %v, want %v", got.ReceivedAt, base)
-	}
-
-	// A first event waiting to retry does not block the second.
-	if _, err := s.db.ExecContext(ctx, `UPDATE events SET next_attempt_at = ? WHERE id = ?`,
-		ts(base.Add(time.Hour)), first); err != nil {
-		t.Fatal(err)
-	}
-	got, err = s.NextUntriaged(ctx, base.Add(time.Minute))
-	if err != nil || got == nil || got.ID != second {
-		t.Fatalf("NextUntriaged(+1m) = %+v, %v; want event %d", got, err, second)
-	}
-
-	got, err = s.NextUntriaged(ctx, base.Add(time.Hour))
-	if err != nil || got == nil || got.ID != first {
-		t.Fatalf("NextUntriaged(+1h) = %+v, %v; want event %d", got, err, first)
-	}
-}
-
-// Review focus: if timestamps did not sort as text, the queue and the daily
-// spend window would silently misorder.
+// Review focus: if timestamps did not sort as text, anything ordered or
+// windowed by time would silently misorder.
 func TestTimestampsSortAsText(t *testing.T) {
 	base := time.Date(2026, 10, 13, 12, 0, 5, 0, time.UTC)
 	times := []time.Time{base, base.Add(100 * time.Millisecond), base.Add(time.Second), base.Add(10 * time.Hour)}
@@ -119,22 +48,6 @@ func TestTimestampsSortAsText(t *testing.T) {
 	back, err := parseTS(ts(in))
 	if err != nil || !back.Equal(in) {
 		t.Errorf("round trip = %v, %v; want %v", back, err, in)
-	}
-}
-
-func TestLastEventAtIgnoresCron(t *testing.T) {
-	ctx := context.Background()
-	s := openTemp(t, filepath.Join(t.TempDir(), "state.db"))
-	defer func() { _ = s.Close() }()
-
-	if got, err := s.LastEventAt(ctx); err != nil || !got.IsZero() {
-		t.Fatalf("empty LastEventAt = %v, %v; want zero", got, err)
-	}
-	base := time.Date(2026, 10, 13, 12, 0, 0, 0, time.UTC)
-	insertEvent(t, s, Event{DeliveryID: "a", ReceivedAt: base})
-	insertEvent(t, s, Event{Source: SourceCron, Kind: "cron.daily", ReceivedAt: base.Add(time.Hour)})
-	if got, err := s.LastEventAt(ctx); err != nil || !got.Equal(base) {
-		t.Fatalf("LastEventAt = %v, %v; want %v", got, err, base)
 	}
 }
 
@@ -174,8 +87,9 @@ func TestOpenUpgradesPhase0Database(t *testing.T) {
 	if err := s.db.QueryRow(`SELECT paused FROM control WHERE id = 1`).Scan(&paused); err != nil || paused != 0 {
 		t.Fatalf("control.paused = %d, %v; want 0", paused, err)
 	}
-	if n, err := s.QueueDepth(ctx); err != nil || n != 0 {
-		t.Fatalf("QueueDepth = %d, %v", n, err)
+	var events int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM events`).Scan(&events); err != nil || events != 0 {
+		t.Fatalf("events = %d, %v; want 0", events, err)
 	}
 }
 

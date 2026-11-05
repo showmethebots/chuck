@@ -1,7 +1,8 @@
-// Package daemon is the long-running process: it serves /healthz and the
-// GitHub webhook, logs a heartbeat, and runs background jobs (the triage
-// loop, Slack, cron) for its lifetime.
-package daemon
+// Package web is chuck's HTTP surface and process lifetime: it serves
+// /healthz and the GitHub webhook, logs a heartbeat, and runs background
+// jobs for its lifetime. The dashboard and worker API mount here as they
+// land.
+package web
 
 import (
 	"context"
@@ -14,7 +15,8 @@ import (
 	"time"
 )
 
-type Daemon struct {
+// Server is the long-running process.
+type Server struct {
 	Log       *slog.Logger
 	Interval  time.Duration
 	Version   string
@@ -25,8 +27,6 @@ type Daemon struct {
 	Webhook http.Handler
 	// Integrations names what the environment switched on, for /healthz.
 	Integrations []string
-	// QueueDepth, when set, is reported by /healthz.
-	QueueDepth func(context.Context) (int, error)
 	// Background jobs run for the daemon's lifetime and must return once
 	// their context ends.
 	Background []func(context.Context)
@@ -37,7 +37,7 @@ type Daemon struct {
 // Run serves HTTP on ln, runs Background jobs, and logs a heartbeat every
 // Interval until ctx is cancelled. It returns nil on a clean shutdown, after
 // every background job has returned.
-func (d *Daemon) Run(ctx context.Context, ln net.Listener) error {
+func (d *Server) Run(ctx context.Context, ln net.Listener) error {
 	d.started = time.Now()
 	srv := d.server()
 
@@ -82,7 +82,7 @@ func (d *Daemon) Run(ctx context.Context, ln net.Listener) error {
 	}
 }
 
-func (d *Daemon) integrations() []string {
+func (d *Server) integrations() []string {
 	if d.Integrations == nil {
 		return []string{}
 	}
@@ -93,7 +93,7 @@ func (d *Daemon) integrations() []string {
 // covers the body for every route except the GitHub webhook, which bounds
 // the wait for a read slot and replaces the read deadline with its own
 // 10 s once it holds one (see events.GitHub).
-func (d *Daemon) server() *http.Server {
+func (d *Server) server() *http.Server {
 	return &http.Server{
 		Handler:           d.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
@@ -101,8 +101,8 @@ func (d *Daemon) server() *http.Server {
 	}
 }
 
-// Handler serves the daemon's HTTP endpoints.
-func (d *Daemon) Handler() http.Handler {
+// Handler serves chuck's HTTP endpoints.
+func (d *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		body := map[string]any{
@@ -110,11 +110,6 @@ func (d *Daemon) Handler() http.Handler {
 			"version":      d.Version,
 			"boot_count":   d.BootCount,
 			"integrations": d.integrations(),
-		}
-		if d.QueueDepth != nil {
-			if n, err := d.QueueDepth(r.Context()); err == nil {
-				body["queue_depth"] = n
-			}
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(body)
