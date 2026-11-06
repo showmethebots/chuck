@@ -31,7 +31,7 @@ deploy:
 # Runs through npm 11 because npm 10 (bundled with Node 22) fails on a
 # full-length SHA in a git spec with "GitFetcher requires an Arborist
 # constructor". Drop the npm@11 wrapper once every machine is on npm 11.
-AGENT_SKILLS = npx -y npm@11 exec -y --package=github:cwinters8/agent-skills\#1f8e33d2ccf1524b500949b9d29c8f2a2b29aa3b -- agent-skills
+AGENT_SKILLS = npx -y npm@11 exec -y --package=github:cwinters8/agent-skills\#dbd8dd19484ce2acd5686ede4e8abffe85b3b7ab -- agent-skills
 
 skills-sync:
 	$(AGENT_SKILLS) sync

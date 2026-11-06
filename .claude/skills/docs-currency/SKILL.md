@@ -9,7 +9,7 @@ description: >
   variable or a changed default just moved, or when another skill invokes
   docs-currency.
 ---
-<!-- vendored from @cwinters8/agent-skills@2.8.0 — edit upstream, then re-run the sync -->
+<!-- vendored from @cwinters8/agent-skills@2.9.0 — edit upstream, then re-run the sync -->
 
 # Docs currency
 

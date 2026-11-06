@@ -8,7 +8,7 @@ description: >
   after a large refactor, migration, or rewrite merges — that is what
   invalidates a profile wholesale.
 ---
-<!-- vendored from @cwinters8/agent-skills@2.8.0 — edit upstream, then re-run the sync -->
+<!-- vendored from @cwinters8/agent-skills@2.9.0 — edit upstream, then re-run the sync -->
 
 # Profile refresh
 

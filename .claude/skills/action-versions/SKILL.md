@@ -17,7 +17,7 @@ description: >
   "update actions", or "check action versions", and as part of any
   workflow-touching diff so stale majors never reach review.
 ---
-<!-- vendored from @cwinters8/agent-skills@2.8.0 — edit upstream, then re-run the sync -->
+<!-- vendored from @cwinters8/agent-skills@2.9.0 — edit upstream, then re-run the sync -->
 
 # Action versions
 

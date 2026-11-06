@@ -7,7 +7,7 @@ description: >
   when a change is ready to ship, or when asked to "preflight", "run the QA
   gate", or "get this ready for review".
 ---
-<!-- vendored from @cwinters8/agent-skills@2.8.0 — edit upstream, then re-run the sync -->
+<!-- vendored from @cwinters8/agent-skills@2.9.0 — edit upstream, then re-run the sync -->
 
 # PR preflight
 
@@ -207,3 +207,10 @@ a draft, that skill is also what marks it ready for review once it reaches the
 ready-to-merge bar, so the maintainer's only remaining action is the merge. If
 it isn't vendored here, say so when you report the PR: nothing triages the
 feedback this step just subscribed you to, and any draft stays a draft.
+
+Where a project wants every PR reviewed by a fresh session before the
+maintainer sees it, hand off to `pr-review-cycle` instead, once the PR is open.
+It runs the same `review-sweep` triage between rounds, adds a fresh-session
+`pr-review` of every new head, and brings the PR to the maintainer through
+`pr-handoff` once a review is clean and CI is green. If it isn't vendored, the
+paragraph above is the whole hand-off.
