@@ -226,10 +226,12 @@ Active states, which count against `wip_limit`: `building`, `review`,
 | verdict review `failed`, or rounds ≥ `review_rounds` | | → `needs-human` |
 | verdict sweep `changes_pushed` | | → `review`, launch review |
 | verdict sweep `ready` | head = reviewed sha, no open findings, no unfixed security findings, no risk paths, `auto_merge` | → `merging`, set `chuck/loop` success on the head and enable auto-merge (direct merge if GitHub refuses auto-merge on a clean PR) |
-| verdict sweep `ready` | head = reviewed sha, no open findings, no unfixed security findings, but a risk path or `auto_merge` off | → `awaiting-merge` with reasons; `chuck/loop` success, so a human can merge |
+| verdict sweep `ready` | head = reviewed sha, no open findings, no unfixed security findings, but a risk path | → `awaiting-merge` with reasons; `chuck/loop` pending ("waiting for human approval: risk paths …") |
+| verdict sweep `ready` | head = reviewed sha, no open findings, no unfixed security findings, no risk path, `auto_merge` off | → `awaiting-merge`; `chuck/loop` success, so a human can merge |
 | verdict sweep `ready` | open or unfixed findings | → `awaiting-merge` with reasons; `chuck/loop` failure |
 | verdict sweep `ready` | head moved since review | → `review`, launch review |
 | verdict sweep `cap_reached` or `blocked` | | → `needs-human` |
+| `pull_request_review` `approved` by a human, `pull_request.labeled loop:approve-merge` by a human, or dashboard Approve merge | `awaiting-merge`, PR open, approval for the head sha, head = reviewed sha | stays `awaiting-merge`; `chuck/loop` success on the head |
 | `pull_request.synchronize` by a human | `review`, `sweep`, `awaiting-merge` | → `review`, launch review; `chuck/loop` pending on the new head |
 | `pull_request.closed` merged | `merging`, `awaiting-merge` | → `merged` |
 | `pull_request.closed` merged | any other PR state | PR and issue → `needs-human`, "merged outside the loop" |
@@ -282,9 +284,19 @@ outside the prompt stop that:
   `chuck/loop` status, and lists no bypass actor, so chuck's App is bound
   by it too.
 - `chuck/loop` is a commit status that needs `statuses: write`. Worker
-  tokens never have it. chuck sets it `success` only in the transitions
-  above, so a PR cannot merge before the sweep verdict clears it, by
-  anyone.
+  tokens never have it. chuck sets it `success` only in the sweep-ready
+  transitions and on a human merge approval, so a PR cannot merge before
+  the sweep verdict clears it, by anyone.
+- A PR that touches a risk path stops at `awaiting-merge` with
+  `chuck/loop` pending. Only `CODEOWNERS` paths get a GitHub-enforced
+  human review, so without this a prompt-injected worker on a later stage
+  could merge a migration or a dependency change itself once the status
+  turned green. The status turns `success` only on a human approval of
+  the reviewed head: a review approval or a `loop:approve-merge` label
+  from a user in `humans`, or dashboard Approve merge. Approval of any
+  other sha is ignored, and a human push resets the status to pending and
+  relaunches review. A push by anyone else leaves the new head with no
+  `chuck/loop` status, so it cannot merge.
 - `.claude/**` and `.github/**` are owned in `CODEOWNERS` and the ruleset
   requires code-owner review. They are risk paths that stop at
   `awaiting-merge` anyway; this makes a human review of a `loop.json`
@@ -709,7 +721,7 @@ executes nothing", routes and policy declarations, and per-tier budget
 rules go. New invariants: state is committed before effects; workers
 never hold chuck's App token or a Claude credential; no worker token
 carries `statuses`; the `chuck/loop` status is set `success` only by the
-sweep-ready transitions; the validator token is read-only; prompts carry
+sweep-ready transitions and human merge approval; the validator token is read-only; prompts carry
 feedback only from `humans` and chuck's App; `awaiting-approval` is
 always a human gate; `loop.json` is a risk path; evidence is never served
 inline except as sniffed image or plain-text types; additive migrations

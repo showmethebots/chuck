@@ -40,6 +40,16 @@ true, not before.
   without a replica configured. `kill_timeout` in `deploy/fly.toml` gives
   Litestream time to flush on shutdown.
 - **Workers are destroyed, not stopped.** Stopped Fly Machines still bill.
+- **`chuck/loop` turns `success` only two ways.** The sweep-ready
+  transitions, and a human merge approval of the reviewed head. A PR that
+  touches a risk path holds it pending until that approval, since
+  `CODEOWNERS` covers only `.claude/**` and `.github/**` and worker tokens
+  can call the merge API.
+- **`loop.Transition` does no I/O.** It decides from the item, the repo,
+  the config, the input and the `Facts` the caller gathered, and returns
+  changes and effects. The package imports no network, database or
+  filesystem package (`TestPackageImportsNoIO`), so every rule is a table
+  test.
 
 ## Conventions
 

@@ -76,16 +76,16 @@ type Finding struct {
 }
 
 type ValidateVerdict struct {
-	Outcome     string   `json:"outcome"`
-	Summary     string   `json:"summary"`
-	TestedSHA   string   `json:"tested_sha"`
-	Criteria    []Result `json:"criteria"`
-	Regressions []Result `json:"regressions"`
+	Outcome     string  `json:"outcome"`
+	Summary     string  `json:"summary"`
+	TestedSHA   string  `json:"tested_sha"`
+	Criteria    []Check `json:"criteria"`
+	Regressions []Check `json:"regressions"`
 }
 
-// Result is one criterion or regression check. ID is set for criteria,
+// Check is one criterion or regression result. ID is set for criteria,
 // Name for regressions.
-type Result struct {
+type Check struct {
 	ID       string   `json:"id,omitempty"`
 	Name     string   `json:"name,omitempty"`
 	Result   string   `json:"result"`
@@ -201,7 +201,7 @@ func (v *Verdict) check() error {
 			bad("outcome pass with no regressions reported")
 		}
 		if v.Validate.Outcome == "pass" {
-			for _, r := range append(append([]Result(nil), v.Validate.Criteria...), v.Validate.Regressions...) {
+			for _, r := range append(append([]Check(nil), v.Validate.Criteria...), v.Validate.Regressions...) {
 				if r.Result != "pass" {
 					bad("outcome pass, but %s is %s", strings.TrimSpace(r.ID+r.Name), r.Result)
 				}
