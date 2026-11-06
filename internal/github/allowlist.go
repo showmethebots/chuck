@@ -16,7 +16,8 @@ import (
 
 // hooksFile is GitHub's `hooks` list from https://api.github.com/meta,
 // used only until the first fetch succeeds. A weekly workflow
-// (hook-ranges.yml) rewrites it and opens a PR when GitHub's list changes,
+// (hook-ranges.yml) pushes an update to a branch and opens an issue when
+// GitHub's list changes; a person opens the PR,
 // so the list chuck boots with is reviewed, not fetched.
 //
 //go:embed hooks.txt

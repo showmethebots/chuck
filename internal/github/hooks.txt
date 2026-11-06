@@ -1,6 +1,6 @@
 # GitHub's webhook source ranges (the "hooks" list of https://api.github.com/meta).
 # chuck uses these only until its first fetch of that list succeeds.
-# .github/workflows/hook-ranges.yml rewrites this file weekly and opens a PR when GitHub's list changes.
+# .github/workflows/hook-ranges.yml checks it weekly; on a change it pushes chore/hook-ranges and opens an issue.
 192.30.252.0/22
 185.199.108.0/22
 140.82.112.0/20

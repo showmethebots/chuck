@@ -531,7 +531,8 @@ daily, keeping the last good list on a failed refresh and a built-in
 list if the first fetch fails. A refresh that changes the list logs every
 range added and removed at Warn. The built-in list is
 `internal/github/hooks.txt`; a weekly workflow (`hook-ranges.yml`) compares
-it to `meta` and opens a PR when they differ, so the list chuck boots with
+it to `meta`; when they differ it pushes the update to a branch and opens
+an issue, and a person opens the PR, so the list chuck boots with
 changes only by review. Outside the ranges, or no header: 403
 without reading the body, logged with the IP. `CHUCK_WEBHOOK_ALLOW_ANY_IP=1`
 skips the check for local development through a tunnel and is logged

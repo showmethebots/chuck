@@ -59,7 +59,8 @@ make skills-check
   `skills-adopt` skill's "Bumping the pinned ref" steps.
 - **Alpine and apt packages:** `ca-certificates`, `git` and `openssh-client`.
   These are unpinned.
-- **CI:** GitHub Actions are SHA-pinned in `.github/workflows/ci.yml`.
+- **CI:** GitHub Actions are SHA-pinned in `.github/workflows/ci.yml` and
+  `.github/workflows/hook-ranges.yml`.
   golangci-lint is pinned to `v2.14.0` in the same file.
   `superfly/flyctl-actions/setup-flyctl` is held at tag `1.6` on purpose. The
   latest release, 1.5, runs on node20, which hosted runners no longer support.
@@ -108,8 +109,8 @@ proxy (version and boot count only) and `POST /webhooks/github`
 `hooks` ranges of `https://api.github.com/meta` (fetched at startup and
 daily, keeping the last good list, built-in `internal/github/hooks.txt`
 until the first fetch succeeds; every change is logged with the ranges
-added and removed, and a weekly workflow proposes `hooks.txt` updates by
-PR) and answers 403 before reading the body or taking a read slot
+added and removed, and the weekly `hook-ranges` workflow pushes a
+`hooks.txt` update to a branch and opens an issue for a person to PR) and answers 403 before reading the body or taking a read slot
 when the sender is outside them or the header is missing or repeated.
 `CHUCK_WEBHOOK_ALLOW_ANY_IP=1` skips that check for local runs behind a
 tunnel and is logged at Warn on startup; it must never be set in
@@ -130,8 +131,13 @@ volume, and the Tigris bucket holding the replicated state. The control
 that guards them is credential custody. `FLY_API_TOKEN` is an app-scoped
 deploy token that only the CI `deploy` job can reach, through the
 `production` GitHub environment. The Tigris keys are Fly app secrets that
-never enter the repo. The workflow runs on `pull_request` and its token is
-`contents: read`, so a fork PR can't reach either credential.
+never enter the repo. The `ci` workflow runs on `pull_request` and its token
+is `contents: read`, so a fork PR can't reach either credential. The
+`hook-ranges` workflow runs only on a schedule or by dispatch, never on a
+PR. Its token can write contents and issues, it doesn't keep checkout
+credentials, and it can't open or approve PRs: "Allow GitHub Actions to
+create and approve pull requests" stays off, so no workflow can satisfy the
+human merge approval.
 
 chuck stores webhook deliveries verbatim and acts on none of them while the
 delivery loop is rebuilt. The loop's own model (GitHub App tokens scoped

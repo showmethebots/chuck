@@ -1,14 +1,15 @@
 name: hook-ranges
 
 # Weekly: compare internal/github/hooks.txt, the webhook source ranges chuck
-# boots with, to GitHub's current "hooks" list, and open a PR when they
-# differ. chuck also refreshes the list at runtime and logs every change;
-# this keeps the built-in copy current through review.
+# boots with, to GitHub's current "hooks" list. When they differ, push the
+# update to the chore/hook-ranges branch and open an issue with the compare
+# link; a person opens the PR from it, so CI runs and a human reviews the
+# change. chuck also refreshes the list at runtime and logs every change;
+# this keeps the built-in copy current.
 #
-# A PR opened with GITHUB_TOKEN does not trigger the ci workflow. Close and
-# reopen it, or push to its branch, to run CI before merging. The repo
-# setting "Allow GitHub Actions to create and approve pull requests" must
-# be on for gh pr create to succeed.
+# It never opens a PR itself: that needs the repo setting "Allow GitHub
+# Actions to create and approve pull requests", which would also let any
+# workflow approve PRs. Keep that setting off.
 
 on:
   schedule:
@@ -17,28 +18,34 @@ on:
 
 permissions:
   contents: write
-  pull-requests: write
+  issues: write
 
 jobs:
   check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Fetch GitHub's hook ranges
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          curl -fsS -H 'Accept: application/vnd.github+json' https://api.github.com/meta -o meta.json
-          ranges=$(jq -r '.hooks[]' meta.json)
+          curl -fsS -H 'Accept: application/vnd.github+json' -H "Authorization: Bearer $GH_TOKEN" \
+            https://api.github.com/meta -o "$RUNNER_TEMP/meta.json"
+          ranges=$(jq -r '.hooks[]' "$RUNNER_TEMP/meta.json")
           if [ -z "$ranges" ]; then
             echo "::error::meta returned no hooks ranges"
             exit 1
           fi
-          { grep '^#' internal/github/hooks.txt; printf '%s\n' "$ranges"; } > hooks.new
-          mv hooks.new internal/github/hooks.txt
-          rm meta.json
-      - name: Open a PR if the list changed
+          { grep '^#' internal/github/hooks.txt; printf '%s\n' "$ranges"; } > "$RUNNER_TEMP/hooks.txt"
+          cp "$RUNNER_TEMP/hooks.txt" internal/github/hooks.txt
+      - name: Push the update and open an issue
         env:
           GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          BASE: ${{ github.event.repository.default_branch }}
         run: |
           set -euo pipefail
           if git diff --quiet -- internal/github/hooks.txt; then
@@ -47,12 +54,22 @@ jobs:
           fi
           git diff -- internal/github/hooks.txt
           branch=chore/hook-ranges
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git switch -C "$branch"
-          git commit -am "Update GitHub's webhook ranges in hooks.txt"
-          git push --force origin "$branch"
-          if [ -z "$(gh pr list --head "$branch" --state open --json number --jq '.[].number')" ]; then
-            gh pr create --head "$branch" --title "Update GitHub's webhook ranges" \
-              --body "GitHub's \`hooks\` list at https://api.github.com/meta no longer matches \`internal/github/hooks.txt\`. Check the diff: an added range lets that range send webhooks, a removed one stops it. Opened by \`.github/workflows/hook-ranges.yml\`."
+          auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          # Leave the branch alone when it already carries this list, so a
+          # person's commits, CI and review on it survive the next run.
+          if git -c http.extraheader="$auth" fetch --quiet origin "$branch" 2>/dev/null &&
+            git show FETCH_HEAD:internal/github/hooks.txt | cmp -s - internal/github/hooks.txt; then
+            echo "$branch already has this list"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git switch -C "$branch"
+            git commit -am "Update GitHub's webhook ranges in hooks.txt"
+            git -c http.extraheader="$auth" push --force origin "$branch"
+          fi
+          title="GitHub's webhook ranges changed"
+          if [ -z "$(gh issue list --repo "$REPO" --state open --search "\"$title\" in:title" --json number --jq '.[].number')" ]; then
+            gh issue create --repo "$REPO" --title "$title" --body "GitHub's \`hooks\` list at https://api.github.com/meta no longer matches \`internal/github/hooks.txt\`. The update is on \`$branch\`: https://github.com/$REPO/compare/$BASE...$branch
+
+          Open a PR from it and check the diff. An added range lets that range send webhooks; a removed one stops it. Opened by \`.github/workflows/hook-ranges.yml\`."
           fi
