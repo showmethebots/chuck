@@ -253,7 +253,7 @@ Active states, which count against `wip_limit`: `building`, `review`,
 | `workflow_run deploy-prod` success | `promoting` | PR → `done`; issue → `done`; ratchet issue if `ratchet` is on and the issue is not itself a ratchet issue; start next ready |
 | `workflow_run deploy-prod` failure | `promoting` | → `needs-human` |
 | tick | active state older than `stale_hours` | → `needs-human` |
-| dashboard Re-queue | `needs-human` | → `escalated_from`, launch its stage |
+| dashboard Re-queue | `needs-human`, no run still open (a stale tick leaves the Machine running; Cancel run first), WIP room for an active state | → `escalated_from`, launch its stage |
 | dashboard Close out | `needs-human` | → `closed` |
 | dashboard Cancel run | a run is open | destroy Machine, `error` verdict, then the verdict rules apply |
 | anything else | | no transition; reason on the webhook row |

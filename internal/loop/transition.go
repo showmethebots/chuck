@@ -750,6 +750,13 @@ func (t *txn) requeue(item *Item) {
 		t.skip("nothing to re-queue to")
 		return
 	}
+	// A stale tick escalates without stopping the Machine, so a worker can
+	// still be running. Re-queueing then would start a second one on the
+	// same branch; cancel the run first.
+	if t.f.OpenRun != nil {
+		t.skip("run %d is still open; cancel it before re-queueing", t.f.OpenRun.ID)
+		return
+	}
 	if to.Active() && t.active >= t.cfg.WIPLimit {
 		t.skip("WIP limit %d reached", t.cfg.WIPLimit)
 		return
