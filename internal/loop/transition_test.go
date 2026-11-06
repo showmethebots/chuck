@@ -381,6 +381,8 @@ func TestTransitionTable(t *testing.T) {
 			in: withFacts(dash(ActionRequeue, nil), Facts{ActiveCount: 1}), reason: "WIP limit"},
 		{name: "re-queue while a stale run is still open", item: func() *Item { i := issue(12, StateNeedsHuman); i.EscalatedFrom = StateBuilding; return i }(),
 			in: withFacts(dash(ActionRequeue, nil), Facts{OpenRun: &OpenRun{ID: 8, Stage: config.StageBuild, Attempt: 1}}), reason: "run 8 is still open"},
+		{name: "cancel the stale run from needs-human", item: func() *Item { i := issue(12, StateNeedsHuman); i.EscalatedFrom = StateBuilding; return i }(),
+			in: withFacts(dash(ActionCancelRun, nil), Facts{OpenRun: &OpenRun{ID: 8, Stage: config.StageBuild, Attempt: 1}}), effects: []string{"destroy_machine"}},
 		{name: "close out", item: issue(12, StateNeedsHuman), in: dash(ActionCloseOut, nil), moves: []string{"issue#12:closed"}},
 		{name: "cancel run", item: pr(13, 12, StateReview),
 			in:    withFacts(dash(ActionCancelRun, nil), Facts{ActiveCount: 1, OpenRun: &OpenRun{ID: 7, Stage: config.StageReview, Attempt: 1}}),
