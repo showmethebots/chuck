@@ -104,17 +104,22 @@ to `main` deploys to production through the `production` environment.
 The repo ships a container image to a single Fly Machine (`chuck`). Its
 inbound surfaces are the unauthenticated `GET /healthz` behind Fly's HTTPS
 proxy (version and boot count only) and `POST /webhooks/github`
-(`internal/events`), which verifies GitHub's `X-Hub-Signature-256` with
-HMAC-SHA256 against `GITHUB_APP_WEBHOOK_SECRET` — an empty secret rejects
-every request rather than opening the endpoint — caps the body at 25 MB,
+(`internal/github`). The webhook first checks `Fly-Client-IP` against the
+`hooks` ranges of `https://api.github.com/meta` (fetched at startup and
+daily, keeping the last good list, built-in list until the first fetch
+succeeds) and answers 403 before reading the body or taking a read slot
+when the sender is outside them or the header is missing or repeated.
+`CHUCK_WEBHOOK_ALLOW_ANY_IP=1` skips that check for local runs behind a
+tunnel and is logged at Warn on startup; it must never be set in
+production. It then verifies GitHub's `X-Hub-Signature-256` with
+HMAC-SHA256 against `GITHUB_APP_WEBHOOK_SECRET` (an empty secret rejects
+every request rather than opening the endpoint), caps the body at 25 MB,
 reads at most 2 bodies at once into exactly-sized buffers, and bounds both
 the wait for a read slot (then 503) and the read itself (then 408) at 10 s.
-The body is read before the
-signature can be checked, so unsigned senders can still cause memory
-pressure (measured locally at about 127 MB peak against the 512 MB
-Machine) and can occupy both read slots; turning away non-GitHub senders
-before reading is the complete fix (issue #6). chuck makes no outbound
-calls today. What matters is the Fly app, its
+The range check rests on Fly's proxy setting `Fly-Client-IP` itself; a
+sender that could forge it would be back to costing a read slot, not past
+the signature check. chuck's outbound calls are GitHub's meta endpoint
+and, once the executor lands, the GitHub API with the App's tokens. What matters is the Fly app, its
 volume, and the Tigris bucket holding the replicated state. The control
 that guards them is credential custody. `FLY_API_TOKEN` is an app-scoped
 deploy token that only the CI `deploy` job can reach, through the
@@ -136,7 +141,7 @@ in the spec's "Identities", "Who can merge", "The Claude proxy" and
 | `config/**` | authorization |
 | `internal/config/**` | authorization |
 | `internal/web/**` | client-data, auth-session, authorization |
-| `internal/events/**` | secrets, client-data |
+| `internal/github/**` | secrets, authorization, client-data |
 | `internal/memory/**` | client-data |
 | `internal/loop/**` | authorization, client-data |
 | `cmd/**` | secrets, client-data |

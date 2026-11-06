@@ -92,7 +92,11 @@ Only needed to run chuck on your laptop against real GitHub traffic.
    **new** secret from `openssl rand -hex 32` (put it in your local `.env`,
    copied from `.env.example`, as `GITHUB_APP_WEBHOOK_SECRET`); and
    **Install** on `showmethebots` → **Only select repositories** → `demos`.
-5. Run chuck from the repo root with `make run`. Later sessions follow
+5. In `.env`, set `CHUCK_WEBHOOK_ALLOW_ANY_IP=1`. Deliveries through a
+   tunnel arrive from the tunnel, not GitHub's IP ranges, and there is no
+   Fly proxy to set `Fly-Client-IP`, so without it every delivery gets 403.
+   The signature is still checked. Never set it on Fly.
+6. Run chuck from the repo root with `make run`. Later sessions follow
    "Running locally" in the [README](../README.md#running-locally); the
    Webhook URL does not change.
 

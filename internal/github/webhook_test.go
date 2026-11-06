@@ -1,4 +1,4 @@
-package events
+package github
 
 import (
 	"bufio"
@@ -63,8 +63,16 @@ func (f *fakeStore) InsertWebhook(_ context.Context, e memory.Webhook) (int64, b
 
 var fixedNow = time.Date(2026, 10, 13, 12, 0, 0, 0, time.UTC)
 
-func newHook(store *fakeStore, secret string) *GitHub {
-	return &GitHub{
+// hookReq is a delivery from inside GitHub's hook ranges.
+func hookReq(body io.Reader) *http.Request {
+	r := httptest.NewRequest(http.MethodPost, "/webhooks/github", body)
+	r.Header.Set("Fly-Client-IP", "140.82.112.5")
+	return r
+}
+
+func newHook(store *fakeStore, secret string) *Receiver {
+	return &Receiver{
+		Allow:  builtinAllowlist(),
 		Secret: []byte(secret),
 		Store:  store,
 		Log:    slog.New(slog.NewTextHandler(io.Discard, nil)),
@@ -73,7 +81,7 @@ func newHook(store *fakeStore, secret string) *GitHub {
 }
 
 func deliver(h http.Handler, event, delivery, sig string, body []byte) *httptest.ResponseRecorder {
-	r := httptest.NewRequest(http.MethodPost, "/webhooks/github", bytes.NewReader(body))
+	r := hookReq(bytes.NewReader(body))
 	if event != "" {
 		r.Header.Set("X-GitHub-Event", event)
 	}
@@ -230,7 +238,7 @@ func (b *blockingBody) Read([]byte) (int, error) {
 func TestWebhookLimitsBodiesInFlight(t *testing.T) {
 	h := newHook(&fakeStore{}, "k")
 	send := func(body io.Reader, done chan<- struct{}) {
-		r := httptest.NewRequest(http.MethodPost, "/webhooks/github", body)
+		r := hookReq(body)
 		h.ServeHTTP(httptest.NewRecorder(), r)
 		close(done)
 	}
@@ -287,7 +295,7 @@ func TestWebhookQueuedRequestTimesOut(t *testing.T) {
 		// Recorders ignore read deadlines, so these hold their slots until released.
 		b := &blockingBody{started: make(chan struct{}), release: make(chan struct{})}
 		releases = append(releases, b.release)
-		go h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/webhooks/github", b))
+		go h.ServeHTTP(httptest.NewRecorder(), hookReq(b))
 		<-b.started
 	}
 	defer func() {
@@ -298,7 +306,7 @@ func TestWebhookQueuedRequestTimesOut(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	start := time.Now()
-	h.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/webhooks/github", strings.NewReader("{}")))
+	h.ServeHTTP(w, hookReq(strings.NewReader("{}")))
 	if w.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want 503 for a request that waited past BodyTimeout", w.Code)
 	}
@@ -314,7 +322,7 @@ func TestWebhookReadsBodyWithOneAllocation(t *testing.T) {
 	const size = 8 << 20
 	body := bytes.Repeat([]byte("a"), size)
 	h := newHook(&fakeStore{}, "k")
-	r := httptest.NewRequest(http.MethodPost, "/webhooks/github", bytes.NewReader(body))
+	r := hookReq(bytes.NewReader(body))
 	r.Header.Set("X-Hub-Signature-256", "sha256=00") // rejected after the read
 	w := httptest.NewRecorder()
 
@@ -353,7 +361,7 @@ func TestWebhookBodyReadErrorStatus(t *testing.T) {
 		{"other read error", errors.New("connection reset"), http.StatusBadRequest},
 	}
 	for _, c := range cases {
-		r := httptest.NewRequest(http.MethodPost, "/webhooks/github", errBody{c.err})
+		r := hookReq(errBody{c.err})
 		r.ContentLength = -1
 		w := httptest.NewRecorder()
 		newHook(&fakeStore{}, "k").ServeHTTP(w, r)
@@ -366,7 +374,7 @@ func TestWebhookBodyReadErrorStatus(t *testing.T) {
 func TestWebhookRejectsDeclaredOversizeBeforeReading(t *testing.T) {
 	b := &blockingBody{started: make(chan struct{}), release: make(chan struct{})}
 	close(b.release)
-	r := httptest.NewRequest(http.MethodPost, "/webhooks/github", b)
+	r := hookReq(b)
 	r.ContentLength = maxBody + 1
 	w := httptest.NewRecorder()
 	newHook(&fakeStore{}, "k").ServeHTTP(w, r)
@@ -395,7 +403,7 @@ func TestWebhookStalledSenderTimesOut(t *testing.T) {
 	}
 	defer func() { _ = conn.Close() }()
 	// Declare 1000 bytes, send 10, then stall.
-	_, err = fmt.Fprintf(conn, "POST /webhooks/github HTTP/1.1\r\nHost: x\r\nContent-Length: 1000\r\n\r\n0123456789")
+	_, err = fmt.Fprintf(conn, "POST /webhooks/github HTTP/1.1\r\nHost: x\r\nFly-Client-IP: 140.82.112.5\r\nContent-Length: 1000\r\n\r\n0123456789")
 	if err != nil {
 		t.Fatal(err)
 	}
