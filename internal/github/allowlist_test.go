@@ -44,7 +44,7 @@ func metaServer(t *testing.T, status int, body string) *httptest.Server {
 func TestAllowlistRefreshReplacesTheList(t *testing.T) {
 	srv := metaServer(t, 200, `{"hooks":["203.0.113.0/24","2001:db8::/32"],"web":["1.1.1.1/32"]}`)
 	a := NewAllowlist()
-	if err := a.Refresh(context.Background(), srv.Client(), srv.URL); err != nil {
+	if _, err := a.Refresh(context.Background(), srv.Client(), srv.URL); err != nil {
 		t.Fatal(err)
 	}
 	if a.Builtin() || !a.Contains(netip.MustParseAddr("203.0.113.9")) || !a.Contains(netip.MustParseAddr("2001:db8::5")) {
@@ -55,10 +55,42 @@ func TestAllowlistRefreshReplacesTheList(t *testing.T) {
 	}
 }
 
+func TestAllowlistRefreshReportsTheDiff(t *testing.T) {
+	a := NewAllowlist()
+	srv := metaServer(t, 200, `{"hooks":["192.30.252.0/22","185.199.108.0/22","140.82.112.0/20","143.55.64.0/20",`+
+		`"2a0a:a440::/29","2606:50c0::/32","203.0.113.0/24"]}`)
+	d, err := a.Refresh(context.Background(), srv.Client(), srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !d.Changed() || len(d.Added) != 1 || d.Added[0] != "203.0.113.0/24" || len(d.Removed) != 0 {
+		t.Errorf("diff = %+v, want one range added", d)
+	}
+	if d, _ := a.Refresh(context.Background(), srv.Client(), srv.URL); d.Changed() {
+		t.Errorf("second refresh diff = %+v, want unchanged", d)
+	}
+	gone := metaServer(t, 200, `{"hooks":["203.0.113.0/24"]}`)
+	if d, _ := a.Refresh(context.Background(), gone.Client(), gone.URL); len(d.Removed) != 6 || len(d.Added) != 0 {
+		t.Errorf("diff = %+v, want six removed", d)
+	}
+}
+
+// hooks.txt parses, and every entry is a range.
+func TestBuiltinHooksParse(t *testing.T) {
+	if len(builtinHooks) == 0 {
+		t.Fatal("no built-in ranges")
+	}
+	for _, s := range builtinHooks {
+		if _, err := netip.ParsePrefix(s); err != nil {
+			t.Errorf("%q: %v", s, err)
+		}
+	}
+}
+
 func TestAllowlistFailedRefreshKeepsTheList(t *testing.T) {
 	good := metaServer(t, 200, `{"hooks":["203.0.113.0/24"]}`)
 	a := NewAllowlist()
-	if err := a.Refresh(context.Background(), good.Client(), good.URL); err != nil {
+	if _, err := a.Refresh(context.Background(), good.Client(), good.URL); err != nil {
 		t.Fatal(err)
 	}
 	for name, srv := range map[string]*httptest.Server{
@@ -69,7 +101,7 @@ func TestAllowlistFailedRefreshKeepsTheList(t *testing.T) {
 		"too wide":     metaServer(t, 200, `{"hooks":["0.0.0.0/0"]}`),
 		"too wide v6":  metaServer(t, 200, `{"hooks":["::/0"]}`),
 	} {
-		if err := a.Refresh(context.Background(), srv.Client(), srv.URL); err == nil {
+		if _, err := a.Refresh(context.Background(), srv.Client(), srv.URL); err == nil {
 			t.Errorf("%s: refresh succeeded", name)
 		}
 		if !a.Contains(netip.MustParseAddr("203.0.113.9")) || a.Contains(netip.MustParseAddr("8.8.8.8")) {

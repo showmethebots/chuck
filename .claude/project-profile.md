@@ -106,8 +106,10 @@ inbound surfaces are the unauthenticated `GET /healthz` behind Fly's HTTPS
 proxy (version and boot count only) and `POST /webhooks/github`
 (`internal/github`). The webhook first checks `Fly-Client-IP` against the
 `hooks` ranges of `https://api.github.com/meta` (fetched at startup and
-daily, keeping the last good list, built-in list until the first fetch
-succeeds) and answers 403 before reading the body or taking a read slot
+daily, keeping the last good list, built-in `internal/github/hooks.txt`
+until the first fetch succeeds; every change is logged with the ranges
+added and removed, and a weekly workflow proposes `hooks.txt` updates by
+PR) and answers 403 before reading the body or taking a read slot
 when the sender is outside them or the header is missing or repeated.
 `CHUCK_WEBHOOK_ALLOW_ANY_IP=1` skips that check for local runs behind a
 tunnel and is logged at Warn on startup; it must never be set in

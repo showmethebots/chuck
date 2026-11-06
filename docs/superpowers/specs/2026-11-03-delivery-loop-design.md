@@ -528,7 +528,11 @@ closing issue #6 as written there: before a read slot is taken, the
 request's `Fly-Client-IP` must fall inside the `hooks` ranges (IPv4 and
 IPv6) of `https://api.github.com/meta`, fetched at startup and refreshed
 daily, keeping the last good list on a failed refresh and a built-in
-list if the first fetch fails. Outside the ranges, or no header: 403
+list if the first fetch fails. A refresh that changes the list logs every
+range added and removed at Warn. The built-in list is
+`internal/github/hooks.txt`; a weekly workflow (`hook-ranges.yml`) compares
+it to `meta` and opens a PR when they differ, so the list chuck boots with
+changes only by review. Outside the ranges, or no header: 403
 without reading the body, logged with the IP. `CHUCK_WEBHOOK_ALLOW_ANY_IP=1`
 skips the check for local development through a tunnel and is logged
 loudly at startup. Header checks alone would not do: any sender can set

@@ -2,26 +2,36 @@ package github
 
 import (
 	"context"
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"net/netip"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 )
 
-// builtinHooks is GitHub's `hooks` list from https://api.github.com/meta,
-// used only until the first fetch succeeds. A stale entry here costs at
-// most a few deliveries between boot and that fetch.
-var builtinHooks = []string{
-	"192.30.252.0/22",
-	"185.199.108.0/22",
-	"140.82.112.0/20",
-	"143.55.64.0/20",
-	"2a0a:a440::/29",
-	"2606:50c0::/32",
-}
+// hooksFile is GitHub's `hooks` list from https://api.github.com/meta,
+// used only until the first fetch succeeds. A weekly workflow
+// (hook-ranges.yml) rewrites it and opens a PR when GitHub's list changes,
+// so the list chuck boots with is reviewed, not fetched.
+//
+//go:embed hooks.txt
+var hooksFile string
+
+// builtinHooks is hooksFile without comments and blank lines.
+var builtinHooks = func() []string {
+	var out []string
+	for _, l := range strings.Split(hooksFile, "\n") {
+		if l = strings.TrimSpace(l); l != "" && !strings.HasPrefix(l, "#") {
+			out = append(out, l)
+		}
+	}
+	return out
+}()
 
 // Allowlist is the set of ranges GitHub sends webhooks from. It is safe
 // for concurrent use; a refresh replaces the whole list at once.
@@ -64,66 +74,99 @@ func (a *Allowlist) Builtin() bool {
 	return a.builtin
 }
 
-// Refresh fetches GitHub's meta endpoint and replaces the list. On any
-// failure, including an empty or malformed list, the current list stays:
-// a failed refresh never widens or empties it.
-func (a *Allowlist) Refresh(ctx context.Context, client *http.Client, metaURL string) error {
+// Diff is what a refresh changed, as ranges added and removed.
+type Diff struct {
+	Added, Removed []string
+}
+
+// Changed reports whether the refresh changed anything.
+func (d Diff) Changed() bool { return len(d.Added)+len(d.Removed) > 0 }
+
+func diff(old, new []netip.Prefix) Diff {
+	var d Diff
+	for _, p := range new {
+		if !slices.Contains(old, p) {
+			d.Added = append(d.Added, p.String())
+		}
+	}
+	for _, p := range old {
+		if !slices.Contains(new, p) {
+			d.Removed = append(d.Removed, p.String())
+		}
+	}
+	return d
+}
+
+// Refresh fetches GitHub's meta endpoint, replaces the list, and returns
+// what changed. On any failure, including an empty or malformed list, the
+// current list stays: a failed refresh never widens or empties it.
+func (a *Allowlist) Refresh(ctx context.Context, client *http.Client, metaURL string) (Diff, error) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, metaURL, nil)
 	if err != nil {
-		return err
+		return Diff{}, err
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("github meta: %w", err)
+		return Diff{}, fmt.Errorf("github meta: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("github meta: %s", resp.Status)
+		return Diff{}, fmt.Errorf("github meta: %s", resp.Status)
 	}
 	var meta struct {
 		Hooks []string `json:"hooks"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(nil, resp.Body, 4<<20)).Decode(&meta); err != nil {
-		return fmt.Errorf("github meta: %w", err)
+		return Diff{}, fmt.Errorf("github meta: %w", err)
 	}
 	if len(meta.Hooks) == 0 {
-		return fmt.Errorf("github meta: no hooks ranges")
+		return Diff{}, fmt.Errorf("github meta: no hooks ranges")
 	}
 	prefixes := make([]netip.Prefix, 0, len(meta.Hooks))
 	for _, s := range meta.Hooks {
 		p, err := netip.ParsePrefix(s)
 		if err != nil {
-			return fmt.Errorf("github meta: hooks range %q: %w", s, err)
+			return Diff{}, fmt.Errorf("github meta: hooks range %q: %w", s, err)
 		}
 		// A range this wide is not GitHub's; refuse the whole list rather
 		// than let a bad response open the endpoint.
 		if (p.Addr().Is4() && p.Bits() < 8) || (p.Addr().Is6() && p.Bits() < 16) {
-			return fmt.Errorf("github meta: hooks range %s is too wide", p)
+			return Diff{}, fmt.Errorf("github meta: hooks range %s is too wide", p)
 		}
 		prefixes = append(prefixes, p.Masked())
 	}
 	a.mu.Lock()
+	d := diff(a.prefixes, prefixes)
 	a.prefixes, a.builtin = prefixes, false
 	a.mu.Unlock()
-	return nil
+	return d, nil
 }
 
 // MetaURL is where GitHub publishes its ranges.
 const MetaURL = "https://api.github.com/meta"
 
-// Run refreshes now and then every interval until ctx ends, logging a
-// failure at Error and keeping the last good list.
+// Run refreshes now and then every interval until ctx ends. A failure is
+// logged at Error and keeps the last good list. A refresh that changes the
+// list is logged at Warn with every range added and removed, so no change
+// to who may send webhooks goes unseen; the first one after boot is a
+// change from hooks.txt, which the weekly workflow will also propose.
 func (a *Allowlist) Run(ctx context.Context, log *slog.Logger, client *http.Client, metaURL string, interval time.Duration) {
 	refresh := func() {
-		if err := a.Refresh(ctx, client, metaURL); err != nil {
+		wasBuiltin := a.Builtin()
+		d, err := a.Refresh(ctx, client, metaURL)
+		switch {
+		case err != nil:
 			log.Error("github hook ranges: refresh failed; keeping the current list",
 				"builtin", a.Builtin(), "err", err.Error())
-			return
+		case d.Changed():
+			log.Warn("github hook ranges changed", "from_builtin", wasBuiltin,
+				"added", strings.Join(d.Added, ","), "removed", strings.Join(d.Removed, ","))
+		default:
+			log.Info("github hook ranges refreshed; unchanged", "from_builtin", wasBuiltin)
 		}
-		log.Info("github hook ranges refreshed")
 	}
 	refresh()
 	t := time.NewTicker(interval)
