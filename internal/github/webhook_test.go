@@ -419,3 +419,29 @@ func TestWebhookStalledSenderTimesOut(t *testing.T) {
 		t.Fatalf("status = %d, want 408", resp.StatusCode)
 	}
 }
+
+// A signed body replayed under another X-GitHub-Event is refused for the
+// events the loop acts on.
+func TestWebhookRefusesAnEventNameTheBodyDoesNotMatch(t *testing.T) {
+	store := &fakeStore{}
+	h := newHook(store, "s3cret")
+	review := fixture(t, "pull_request_review_submitted.json")
+	comment := fixture(t, "issue_comment_created.json")
+	for _, c := range []struct {
+		event string
+		body  []byte
+	}{
+		{"pull_request", review},
+		{"issues", comment},
+		{"workflow_run", review},
+		{"pull_request_review", comment},
+	} {
+		w := deliver(h, c.event, "replay-"+c.event, sign([]byte("s3cret"), c.body), c.body)
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("%s with another event's body: status %d", c.event, w.Code)
+		}
+	}
+	if len(store.events) != 0 {
+		t.Errorf("stored %d mismatched deliveries", len(store.events))
+	}
+}

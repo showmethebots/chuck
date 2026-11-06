@@ -153,6 +153,14 @@ func (g *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "payload is not JSON", http.StatusBadRequest)
 		return
 	}
+	// X-GitHub-Event is not signed, so a captured body could be replayed
+	// under another event name. For the events the loop acts on, the
+	// signed payload must have that event's shape.
+	if !payloadMatchesEvent(name, body) {
+		g.Log.Warn("github webhook rejected", "reason", "payload does not match X-GitHub-Event", "event", name, "delivery", delivery)
+		http.Error(w, "payload does not match X-GitHub-Event", http.StatusBadRequest)
+		return
+	}
 	kind := name
 	if meta.Action != "" {
 		kind += "." + meta.Action
@@ -233,4 +241,37 @@ func validSignature(secret, body []byte, header string) bool {
 	mac := hmac.New(sha256.New, secret)
 	mac.Write(body)
 	return hmac.Equal(got, mac.Sum(nil))
+}
+
+// eventShape is, for each event the loop acts on, the top-level keys its
+// payload has and the ones it lacks. Other events are stored as they come;
+// nothing acts on them.
+var eventShape = map[string]struct{ has, lacks []string }{
+	"issues":              {has: []string{"issue"}, lacks: []string{"comment", "pull_request"}},
+	"issue_comment":       {has: []string{"issue", "comment"}},
+	"pull_request":        {has: []string{"pull_request", "number"}, lacks: []string{"review", "comment"}},
+	"pull_request_review": {has: []string{"pull_request", "review"}},
+	"workflow_run":        {has: []string{"workflow_run"}},
+}
+
+func payloadMatchesEvent(event string, body []byte) bool {
+	shape, ok := eventShape[event]
+	if !ok {
+		return true
+	}
+	var top map[string]json.RawMessage
+	if json.Unmarshal(body, &top) != nil {
+		return false
+	}
+	for _, k := range shape.has {
+		if v, ok := top[k]; !ok || string(v) == "null" {
+			return false
+		}
+	}
+	for _, k := range shape.lacks {
+		if _, ok := top[k]; ok {
+			return false
+		}
+	}
+	return true
 }

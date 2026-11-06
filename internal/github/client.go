@@ -40,6 +40,15 @@ func (c *Client) call(ctx context.Context, method, path string, in, out any) err
 	return c.App.do(ctx, "token "+tok, method, path, body, out)
 }
 
+// segment escapes one path segment, refusing ones a server could
+// normalize away ("", ".", "..").
+func segment(s string) (string, error) {
+	if s == "" || s == "." || s == ".." {
+		return "", fmt.Errorf("path segment %q", s)
+	}
+	return url.PathEscape(s), nil
+}
+
 func (c *Client) repoPath(format string, a ...any) string {
 	return "/repos/" + url.PathEscape(c.Owner) + "/" + url.PathEscape(c.Repo) + fmt.Sprintf(format, a...)
 }
@@ -52,7 +61,11 @@ func (c *Client) AddLabel(ctx context.Context, number int, label string) error {
 
 // RemoveLabel removes a label; one that is not there is not an error.
 func (c *Client) RemoveLabel(ctx context.Context, number int, label string) error {
-	err := c.call(ctx, http.MethodDelete, c.repoPath("/issues/%d/labels/%s", number, url.PathEscape(label)), nil, nil)
+	seg, err := segment(label)
+	if err != nil {
+		return err
+	}
+	err = c.call(ctx, http.MethodDelete, c.repoPath("/issues/%d/labels/%s", number, seg), nil, nil)
 	if IsStatus(err, http.StatusNotFound) {
 		return nil
 	}
@@ -268,13 +281,18 @@ const LoopConfigPath = ".claude/loop.json"
 func (c *Client) ReadFile(ctx context.Context, path, ref string) (Blob, error) {
 	var out struct {
 		Type     string `json:"type"`
+		Path     string `json:"path"`
 		SHA      string `json:"sha"`
 		Encoding string `json:"encoding"`
 		Content  string `json:"content"`
 	}
 	segs := strings.Split(path, "/")
 	for i, s := range segs {
-		segs[i] = url.PathEscape(s)
+		seg, err := segment(s)
+		if err != nil {
+			return Blob{}, fmt.Errorf("read %q: %w", path, err)
+		}
+		segs[i] = seg
 	}
 	err := c.call(ctx, http.MethodGet, c.repoPath("/contents/%s?ref=%s", strings.Join(segs, "/"), url.QueryEscape(ref)), nil, &out)
 	if IsStatus(err, http.StatusNotFound) {
@@ -285,6 +303,12 @@ func (c *Client) ReadFile(ctx context.Context, path, ref string) (Blob, error) {
 	}
 	if out.Type != "file" {
 		return Blob{}, fmt.Errorf("%s at %s is a %s, not a file", path, ref, out.Type)
+	}
+	// For a symlink to a file, GitHub answers with the target's content and
+	// path. The loop config must be the file itself, or edits to the
+	// target would change it without touching a risk path.
+	if out.Path != path {
+		return Blob{}, fmt.Errorf("%s at %s resolves to %s; symlinks are not read", path, ref, out.Path)
 	}
 	// Over 1 MB the contents API returns no content; read the blob itself.
 	if out.Encoding != "base64" {

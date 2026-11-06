@@ -25,6 +25,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/showmethebots/chuck/internal/config"
 )
 
 // DefaultBaseURL is GitHub's REST API.
@@ -55,9 +57,17 @@ func (p Permissions) key() string {
 	return strings.Join(ks, ",")
 }
 
-// ErrStatusesForWorker is returned when a worker token would carry
-// `statuses`.
-var ErrStatusesForWorker = errors.New("worker tokens never carry statuses")
+// StagePermissions is the one permission set a worker token may carry for
+// each stage, from the spec's "Identities". No set names `statuses`, so no
+// worker can set `chuck/loop`, nor `workflows`, `administration` or
+// `actions`. Intake edits the issue and opens sub-issues.
+var StagePermissions = map[config.Stage]Permissions{
+	config.StageIntake:   {"issues": "write", "contents": "read", "metadata": "read"},
+	config.StageBuild:    {"contents": "write", "pull_requests": "write", "issues": "write", "metadata": "read"},
+	config.StageReview:   {"pull_requests": "write", "contents": "read", "metadata": "read"},
+	config.StageSweep:    {"contents": "write", "pull_requests": "write", "issues": "write", "metadata": "read"},
+	config.StageValidate: {"contents": "read", "pull_requests": "read", "issues": "read", "metadata": "read"},
+}
 
 // App is one GitHub App: its id and private key.
 type App struct {
@@ -145,13 +155,25 @@ type Token struct {
 	Permissions Permissions `json:"permissions"`
 }
 
-// WorkerToken mints a token for one worker run: the one repository, the
-// stage's permissions, never `statuses`. It is never cached.
-func (a *App) WorkerToken(ctx context.Context, installationID int64, repo string, perms Permissions) (Token, error) {
-	if _, ok := perms["statuses"]; ok {
-		return Token{}, ErrStatusesForWorker
+// WorkerToken mints a token for one worker run: the one repository and
+// the stage's permission set from StagePermissions, never more. It is
+// never cached, and one that comes back carrying a permission the set
+// does not name is refused.
+func (a *App) WorkerToken(ctx context.Context, installationID int64, repo string, stage config.Stage) (Token, error) {
+	perms, ok := StagePermissions[stage]
+	if !ok {
+		return Token{}, fmt.Errorf("github app: no worker permissions for stage %q", stage)
 	}
-	return a.mint(ctx, installationID, repo, perms)
+	t, err := a.mint(ctx, installationID, repo, perms)
+	if err != nil {
+		return Token{}, err
+	}
+	for k, v := range t.Permissions {
+		if want, ok := perms[k]; !ok || (v == "write" && want != "write") {
+			return Token{}, fmt.Errorf("mint worker token: GitHub granted %s:%s, which the %s set does not name", k, v, stage)
+		}
+	}
+	return t, nil
 }
 
 // token is chuck's own token for a repository, reused until five minutes

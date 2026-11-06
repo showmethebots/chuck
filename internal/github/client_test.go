@@ -19,6 +19,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/showmethebots/chuck/internal/config"
 )
 
 var testKey = func() *rsa.PrivateKey {
@@ -145,59 +147,76 @@ func TestParsePrivateKey(t *testing.T) {
 	}
 }
 
-func TestWorkerTokenCarriesExactlyWhatWasAsked(t *testing.T) {
+func TestWorkerTokenCarriesExactlyTheStageSet(t *testing.T) {
 	f, app := newFake(t)
-	perms := Permissions{"contents": "write", "pull_requests": "write", "issues": "write"}
-	tok, err := app.WorkerToken(context.Background(), 7, "demos", perms)
-	if err != nil {
-		t.Fatal(err)
-	}
-	c := f.last()
-	if !strings.HasPrefix(c.Auth, "Bearer ") {
-		t.Errorf("minted with %q, not the App JWT", c.Auth)
-	}
-	if got := c.Body["repositories"].([]any); len(got) != 1 || got[0] != "demos" {
-		t.Errorf("repositories = %v", got)
-	}
-	got := c.Body["permissions"].(map[string]any)
-	if len(got) != len(perms) {
-		t.Errorf("permissions sent = %v, want %v", got, perms)
-	}
-	for k, v := range perms {
-		if got[k] != v {
-			t.Errorf("permissions[%s] = %v, want %s", k, got[k], v)
+	for stage, perms := range StagePermissions {
+		if _, ok := perms["statuses"]; ok {
+			t.Errorf("%s set names statuses", stage)
+		}
+		for _, bad := range []string{"workflows", "administration", "actions", "secrets"} {
+			if _, ok := perms[bad]; ok {
+				t.Errorf("%s set names %s", stage, bad)
+			}
+		}
+		if perms["metadata"] != "read" {
+			t.Errorf("%s set lacks metadata:read", stage)
+		}
+		tok, err := app.WorkerToken(context.Background(), 7, "demos", stage)
+		if err != nil || tok.Value == "" {
+			t.Fatalf("%s: %v", stage, err)
+		}
+		c := f.last()
+		if !strings.HasPrefix(c.Auth, "Bearer ") {
+			t.Errorf("minted with %q, not the App JWT", c.Auth)
+		}
+		if got := c.Body["repositories"].([]any); len(got) != 1 || got[0] != "demos" {
+			t.Errorf("repositories = %v", got)
+		}
+		got := c.Body["permissions"].(map[string]any)
+		if len(got) != len(perms) {
+			t.Errorf("%s: permissions sent = %v, want %v", stage, got, perms)
+		}
+		for k, v := range perms {
+			if got[k] != v {
+				t.Errorf("%s: permissions[%s] = %v, want %s", stage, k, got[k], v)
+			}
 		}
 	}
-	if tok.Value == "" {
-		t.Error("no token")
+	if p := StagePermissions[config.StageValidate]; p["contents"] != "read" || p["pull_requests"] != "read" || p["issues"] != "read" {
+		t.Errorf("validate is not read-only: %v", p)
 	}
 
 	n := len(f.calls)
-	if _, err := app.WorkerToken(context.Background(), 7, "demos", Permissions{"contents": "read", "statuses": "write"}); !errors.Is(err, ErrStatusesForWorker) {
-		t.Errorf("statuses: err = %v", err)
+	if _, err := app.WorkerToken(context.Background(), 7, "demos", "deploy"); err == nil {
+		t.Error("unknown stage minted")
 	}
-	if _, err := app.WorkerToken(context.Background(), 7, "demos", Permissions{"statuses": "read"}); !errors.Is(err, ErrStatusesForWorker) {
-		t.Errorf("statuses read: err = %v", err)
-	}
-	if _, err := app.WorkerToken(context.Background(), 7, "demos", Permissions{}); err == nil {
-		t.Error("empty permission set minted")
-	}
-	if _, err := app.WorkerToken(context.Background(), 7, "o/demos", perms); err == nil {
+	if _, err := app.WorkerToken(context.Background(), 7, "o/demos", config.StageBuild); err == nil {
 		t.Error("owner/name repository minted")
+	}
+	if _, err := app.mint(context.Background(), 7, "demos", Permissions{}); err == nil {
+		t.Error("empty permission set minted")
 	}
 	if len(f.calls) != n {
 		t.Error("a refused token still reached GitHub")
 	}
 
-	// GitHub drops a permission the App lacks; such a token is refused.
-	delete(f.grant, "actions")
-	if _, err := app.WorkerToken(context.Background(), 7, "demos", Permissions{"actions": "write"}); err == nil {
-		t.Error("token missing a permission accepted")
-	}
-	f.grant["checks"] = "read"
-	if _, err := app.WorkerToken(context.Background(), 7, "demos", Permissions{"checks": "write"}); err == nil {
+	// A token that comes back with less, or more, than the set is refused.
+	f.grant["contents"] = "read"
+	if _, err := app.WorkerToken(context.Background(), 7, "demos", config.StageBuild); err == nil {
 		t.Error("token downgraded to read accepted")
 	}
+	f.grant["contents"] = "write"
+	route := f.routes["POST /app/installations/7/access_tokens"]
+	f.routes["POST /app/installations/7/access_tokens"] = func(w http.ResponseWriter, c call) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"token": "ghs_x", "expires_at": time.Now().Add(time.Hour),
+			"permissions": map[string]string{"pull_requests": "write", "contents": "read", "metadata": "read", "statuses": "write"},
+		})
+	}
+	if _, err := app.WorkerToken(context.Background(), 7, "demos", config.StageReview); err == nil {
+		t.Error("token carrying statuses accepted")
+	}
+	f.routes["POST /app/installations/7/access_tokens"] = route
 }
 
 func newClient(t *testing.T) (*fakeGitHub, *Client) {
@@ -378,13 +397,13 @@ func TestReadLoopConfigByBlobSHA(t *testing.T) {
 	content := `{"wip_limit":1}`
 	enc := base64.StdEncoding.EncodeToString([]byte(content))
 	f.ok("GET /repos/showmethebots/demos/contents/.claude/loop.json?ref=main",
-		`{"type":"file","sha":"b10b","encoding":"base64","content":"`+enc[:4]+`\n`+enc[4:]+`"}`)
+		`{"type":"file","path":".claude/loop.json","sha":"b10b","encoding":"base64","content":"`+enc[:4]+`\n`+enc[4:]+`"}`)
 	b, err := c.ReadFile(ctx, LoopConfigPath, "main")
 	if err != nil || b.SHA != "b10b" || string(b.Content) != content {
 		t.Errorf("read = %+v, %v", b, err)
 	}
 	// Over 1 MB the contents API sends no content; the blob is read by sha.
-	f.ok("GET /repos/showmethebots/demos/contents/.claude/loop.json?ref=big", `{"type":"file","sha":"b16","encoding":"none","content":""}`)
+	f.ok("GET /repos/showmethebots/demos/contents/.claude/loop.json?ref=big", `{"type":"file","path":".claude/loop.json","sha":"b16","encoding":"none","content":""}`)
 	f.ok("GET /repos/showmethebots/demos/git/blobs/b16", `{"sha":"b16","encoding":"base64","content":"`+enc+`"}`)
 	if b, err := c.ReadFile(ctx, LoopConfigPath, "big"); err != nil || b.SHA != "b16" || string(b.Content) != content {
 		t.Errorf("large read = %+v, %v", b, err)
@@ -395,6 +414,25 @@ func TestReadLoopConfigByBlobSHA(t *testing.T) {
 	}
 	if _, err := c.ReadFile(ctx, LoopConfigPath, "nope"); !errors.Is(err, ErrNotFound) {
 		t.Errorf("missing file: %v", err)
+	}
+	f.ok("GET /repos/showmethebots/demos/contents/.claude/loop.json?ref=link",
+		`{"type":"file","path":"elsewhere.json","sha":"b10b","encoding":"base64","content":"`+enc+`"}`)
+	if _, err := c.ReadFile(ctx, LoopConfigPath, "link"); err == nil {
+		t.Error("symlinked loop.json read")
+	}
+	n := len(f.calls)
+	for _, p := range []string{"../etc", ".claude/./loop.json", "a//b", ""} {
+		if _, err := c.ReadFile(ctx, p, "main"); err == nil {
+			t.Errorf("read %q", p)
+		}
+	}
+	for _, l := range []string{".", "..", ""} {
+		if err := c.RemoveLabel(ctx, 12, l); err == nil {
+			t.Errorf("removed label %q", l)
+		}
+	}
+	if len(f.calls) != n {
+		t.Error("a refused path reached GitHub")
 	}
 	f.ok("GET /repos/showmethebots/demos/contents/.claude/loop.json?ref=dir", `[{"type":"file"}]`)
 	if _, err := c.ReadFile(ctx, LoopConfigPath, "dir"); err == nil {

@@ -116,9 +116,13 @@ HMAC-SHA256 against `GITHUB_APP_WEBHOOK_SECRET` (an empty secret rejects
 every request rather than opening the endpoint), caps the body at 25 MB,
 reads at most 2 bodies at once into exactly-sized buffers, and bounds both
 the wait for a read slot (then 503) and the read itself (then 408) at 10 s.
-The range check rests on Fly's proxy setting `Fly-Client-IP` itself; a
-sender that could forge it would be back to costing a read slot, not past
-the signature check. chuck's outbound calls are GitHub's meta endpoint
+The range check rests on Fly's proxy setting `Fly-Client-IP` itself. A
+request that skips the proxy, such as one from another Machine in the same
+Fly organization over the private network, can set the header, but that
+only costs a read slot: it does not get past the signature check. For the
+events the loop acts on, the signed payload must also match the unsigned
+`X-GitHub-Event` header, so a captured body cannot be replayed as another
+event. chuck's outbound calls are GitHub's meta endpoint
 and, once the executor lands, the GitHub API with the App's tokens. What matters is the Fly app, its
 volume, and the Tigris bucket holding the replicated state. The control
 that guards them is credential custody. `FLY_API_TOKEN` is an app-scoped
