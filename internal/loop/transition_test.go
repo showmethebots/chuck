@@ -67,7 +67,8 @@ func webhook(event, action string, mod func(*WebhookInput)) Input {
 }
 
 func verdict(stage config.Stage, v *Verdict) Input {
-	return Input{Kind: InputVerdict, Verdict: &VerdictInput{RunID: 1, Stage: stage, Attempt: 1, Verdict: v}}
+	return Input{Kind: InputVerdict, Verdict: &VerdictInput{RunID: 1, Stage: stage, Attempt: 1, Verdict: v},
+		Facts: Facts{OpenRun: &OpenRun{ID: 1, Stage: stage, Attempt: 1}}}
 }
 
 func dash(a DashboardAction, mod func(*DashboardInput)) Input {
@@ -78,7 +79,15 @@ func dash(a DashboardAction, mod func(*DashboardInput)) Input {
 	return Input{Kind: InputDashboard, Action: d}
 }
 
-func withFacts(in Input, f Facts) Input { in.Facts = f; return in }
+// withFacts sets the facts. A verdict keeps its open run unless f names
+// another.
+func withFacts(in Input, f Facts) Input {
+	if f.OpenRun == nil {
+		f.OpenRun = in.Facts.OpenRun
+	}
+	in.Facts = f
+	return in
+}
 
 func sweepReady(findings ...Finding) *Verdict {
 	return &Verdict{Stage: config.StageSweep, Outcome: "ready", Sweep: &SweepVerdict{Outcome: "ready", HeadSHA: head, Findings: findings}}
@@ -177,10 +186,13 @@ func TestTransitionTable(t *testing.T) {
 			in:    withFacts(verdict(config.StageIntake, &Verdict{Intake: &IntakeVerdict{Outcome: "ready_for_approval", CriteriaIDs: []string{"AC-1"}}}), ac),
 			moves: []string{"issue#12:awaiting-approval"}},
 		{name: "intake ready with sub-issues", item: issue(12, StateIntake),
-			in:    verdict(config.StageIntake, &Verdict{Intake: &IntakeVerdict{Outcome: "ready_for_approval", SubIssues: []int{20, 21}}}),
+			in:    withFacts(verdict(config.StageIntake, &Verdict{Intake: &IntakeVerdict{Outcome: "ready_for_approval", SubIssues: []int{20, 21}}}), Facts{SubIssues: []int{20, 21}}),
 			moves: []string{"issue#12:awaiting-approval", "issue#20:awaiting-approval", "issue#21:awaiting-approval"}},
+		{name: "intake ready, sub-issue GitHub does not list", item: issue(12, StateIntake),
+			in:    withFacts(verdict(config.StageIntake, &Verdict{Intake: &IntakeVerdict{Outcome: "ready_for_approval", SubIssues: []int{20, 3}}}), Facts{SubIssues: []int{20}}),
+			moves: []string{"issue#12:needs-human"}, reason: "does not list under this issue: #3"},
 		{name: "intake ready, sub-issue already in the loop", item: issue(12, StateIntake),
-			in:    withFacts(verdict(config.StageIntake, &Verdict{Intake: &IntakeVerdict{Outcome: "ready_for_approval", SubIssues: []int{20, 21}}}), Facts{SubIssuesKnown: []int{20}}),
+			in:    withFacts(verdict(config.StageIntake, &Verdict{Intake: &IntakeVerdict{Outcome: "ready_for_approval", SubIssues: []int{20, 21}}}), Facts{SubIssuesKnown: []int{20}, SubIssues: []int{20, 21}}),
 			moves: []string{"issue#12:awaiting-approval", "issue#21:awaiting-approval"}},
 		{name: "intake needs clarification", item: issue(12, StateIntake),
 			in:    verdict(config.StageIntake, &Verdict{Intake: &IntakeVerdict{Outcome: "needs_clarification", Questions: []string{"Which page?"}}}),
@@ -205,13 +217,13 @@ func TestTransitionTable(t *testing.T) {
 			in:    withFacts(verdict(config.StageBuild, &Verdict{Build: &BuildVerdict{Outcome: "pr_opened", PRNumber: ptr(13)}}), Facts{ActiveCount: 1, Branch: "loop/issue-12", PR: openPR()}),
 			moves: []string{"issue#12:in-pr", "pr#13:review"}, effects: []string{"launch:review"}},
 		{name: "build error under the cap", item: issue(12, StateBuilding),
-			in: Input{Kind: InputVerdict, Verdict: &VerdictInput{Stage: config.StageBuild, Err: "timeout"},
-				Facts: Facts{ActiveCount: 1, Attempts: map[config.Stage]int{config.StageBuild: 1}}},
+			in: Input{Kind: InputVerdict, Verdict: &VerdictInput{RunID: 1, Stage: config.StageBuild, Err: "timeout"},
+				Facts: Facts{ActiveCount: 1, Attempts: map[config.Stage]int{config.StageBuild: 1}, OpenRun: &OpenRun{ID: 1}}},
 			// It leaves building, freeing its own slot, and is the next ready.
 			moves: []string{"issue#12:building"}, effects: []string{"launch:build"}},
 		{name: "build error at the cap", item: issue(12, StateBuilding),
-			in: Input{Kind: InputVerdict, Verdict: &VerdictInput{Stage: config.StageBuild, Err: "timeout"},
-				Facts: Facts{ActiveCount: 1, Attempts: map[config.Stage]int{config.StageBuild: 2}}},
+			in: Input{Kind: InputVerdict, Verdict: &VerdictInput{RunID: 1, Stage: config.StageBuild, Err: "timeout"},
+				Facts: Facts{ActiveCount: 1, Attempts: map[config.Stage]int{config.StageBuild: 2}, OpenRun: &OpenRun{ID: 1}}},
 			moves: []string{"issue#12:needs-human"}, reason: "last attempt"},
 		{name: "build blocked", item: issue(12, StateBuilding),
 			in:    withFacts(verdict(config.StageBuild, &Verdict{Build: &BuildVerdict{Outcome: "blocked", Blockers: []string{"AC-2 is ambiguous"}}}), Facts{ActiveCount: 1}),
@@ -402,8 +414,8 @@ func TestWIPReleaseStartsOldestReady(t *testing.T) {
 
 func TestSameAttemptRelaunchIgnoresCaps(t *testing.T) {
 	row{name: "machine never started at the cap", item: issue(12, StateBuilding),
-		in: Input{Kind: InputVerdict, Verdict: &VerdictInput{Stage: config.StageBuild, Err: "machine never started", SameAttempt: true},
-			Facts: Facts{ActiveCount: 1, Attempts: map[config.Stage]int{config.StageBuild: 2}}},
+		in: Input{Kind: InputVerdict, Verdict: &VerdictInput{RunID: 4, Stage: config.StageBuild, Err: "machine never started", SameAttempt: true},
+			Facts: Facts{ActiveCount: 1, Attempts: map[config.Stage]int{config.StageBuild: 2}, OpenRun: &OpenRun{ID: 4, Stage: config.StageBuild, Attempt: 3}}},
 		moves: []string{"issue#12:building"}, effects: []string{"launch:build"}, reason: "same attempt"}.run(t)
 }
 
@@ -429,7 +441,19 @@ func TestRiskPathHold(t *testing.T) {
 		p.ChangedFiles = []string{"src/a.ts", "db/migrations/0002.sql"}
 		return p
 	}
-	held := func() Facts { return Facts{PR: risky(), ReviewedSHA: head} }
+	held := func() Facts {
+		p := risky()
+		p.LoopStatus = StatusPending
+		return Facts{PR: p, ReviewedSHA: head}
+	}
+	// Held for findings: chuck/loop is failure, whether or not risk paths
+	// are touched too.
+	findings := func(files ...string) Facts {
+		p := openPR()
+		p.ChangedFiles = files
+		p.LoopStatus = StatusFailure
+		return Facts{PR: p, ReviewedSHA: head}
+	}
 	runRows(t, []row{
 		{name: "risk-path sweep ready holds pending", item: pr(13, 12, StateSweep),
 			in:    withFacts(verdict(config.StageSweep, sweepReady()), Facts{ActiveCount: 1, PR: risky(), ReviewedSHA: head}),
@@ -456,6 +480,16 @@ func TestRiskPathHold(t *testing.T) {
 		{name: "dashboard approve merge", item: pr(13, 12, StateAwaitingMerge),
 			in:      withFacts(dash(ActionApproveMerge, func(d *DashboardInput) { d.SHA = head }), held()),
 			effects: []string{"set_status:success"}},
+		{name: "approval of a PR held for findings", item: pr(13, 12, StateAwaitingMerge),
+			in:     withFacts(dash(ActionApproveMerge, func(d *DashboardInput) { d.SHA = head }), findings("db/migrations/0002.sql")),
+			reason: "not held for risk paths"},
+		{name: "approval of a PR held for findings, no risk path", item: pr(13, 12, StateAwaitingMerge),
+			in:     withFacts(webhook("pull_request_review", "submitted", func(w *WebhookInput) { w.ReviewState = "approved"; w.SHA = head }), findings("src/a.ts")),
+			reason: "not held for risk paths"},
+		{name: "approval with no risk path, pending status", item: pr(13, 12, StateAwaitingMerge),
+			in: withFacts(dash(ActionApproveMerge, func(d *DashboardInput) { d.SHA = head }),
+				Facts{PR: func() *PRFacts { p := openPR(); p.LoopStatus = StatusPending; return p }(), ReviewedSHA: head}),
+			reason: "not held for risk paths"},
 		{name: "approval by a non-human", item: pr(13, 12, StateAwaitingMerge),
 			in:     withFacts(webhook("pull_request_review", "submitted", func(w *WebhookInput) { w.ReviewState = "approved"; w.SHA = head; w.SenderID = app }), held()),
 			reason: "non-human"},
@@ -532,6 +566,12 @@ func TestStaleAndMismatchedVerdictsDoNothing(t *testing.T) {
 	runRows(t, []row{
 		{name: "verdict for another stage", item: pr(13, 12, StateSweep),
 			in: verdict(config.StageReview, &Verdict{Review: &ReviewVerdict{Outcome: "posted"}}), reason: "review verdict, but the item is sweep"},
+		{name: "verdict with no run open", item: pr(13, 12, StateReview),
+			in: func() Input {
+				in := verdict(config.StageReview, &Verdict{Review: &ReviewVerdict{Outcome: "posted"}})
+				in.Facts.OpenRun = nil
+				return in
+			}(), reason: "no run is open"},
 		{name: "verdict from an older run", item: pr(13, 12, StateReview),
 			in: withFacts(verdict(config.StageReview, &Verdict{Review: &ReviewVerdict{Outcome: "posted"}}), Facts{OpenRun: &OpenRun{ID: 9}}), reason: "run 9 is open"},
 	})

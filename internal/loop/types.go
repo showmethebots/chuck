@@ -202,12 +202,16 @@ type Facts struct {
 	Supersedes     []string // "#N AC-n" targets of Supersedes lines in the issue body
 	SuiteTests     []string // "#N AC-n" provenance of every test in the suite
 	SubIssuesKnown []int    // sub-issues already in the loop
+	SubIssues      []int    // the issue's sub-issues as GitHub lists them
 	// Build: the branch chuck named.
 	Branch string
 	PR     *PRFacts
 	// The head the last review verdict reported.
 	ReviewedSHA string
-	// The run still open on this item, if any.
+	// The run still open on this item, if any. For a verdict input it is
+	// the run the verdict is for: the caller ends that run in the same
+	// commit as the result, so a verdict whose run has already ended (a
+	// duplicate post, a late one) finds no open run and does nothing.
 	OpenRun *OpenRun
 }
 
@@ -224,6 +228,11 @@ type PRFacts struct {
 	ChecksFailed  bool
 	ChangedFiles  []string
 	PreviousNames []string // renamed files' old paths: a rename out of a risk path is a risk-path change
+	// LoopStatus is the chuck/loop status on the head: "" when there is
+	// none. Only chuck sets it, so at awaiting-merge "pending" means the
+	// sweep held the PR for risk paths, and "failure" that it left
+	// findings.
+	LoopStatus string
 }
 
 // OpenRun is a run that has not ended.

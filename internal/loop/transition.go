@@ -259,6 +259,10 @@ func (t *txn) approveMerge(item *Item, sha string) {
 		t.skip("approval is for %s, not the head %s", short(sha), short(pr.HeadSHA))
 	case sha != t.f.ReviewedSHA:
 		t.skip("approval is for %s, which was not reviewed", short(sha))
+	// Approval clears a risk-path hold and nothing else: a PR held for
+	// unfixed findings needs a new review, not a human's say-so.
+	case pr.LoopStatus != StatusPending || len(t.riskPaths()) == 0:
+		t.skip("PR is not held for risk paths (chuck/loop is %q)", pr.LoopStatus)
 	default:
 		t.effect(Effect{Kind: EffectSetStatus, Item: item.Key(), SHA: sha, Status: StatusSuccess,
 			Text: "approved by a human"})
@@ -385,7 +389,11 @@ func (t *txn) verdict(v VerdictInput) {
 		t.skip("%s verdict, but the item is %s", v.Stage, it.State)
 		return
 	}
-	if t.f.OpenRun != nil && v.RunID != 0 && t.f.OpenRun.ID != v.RunID {
+	switch {
+	case t.f.OpenRun == nil:
+		t.skip("verdict from run %d, but no run is open", v.RunID)
+		return
+	case t.f.OpenRun.ID != v.RunID:
 		t.skip("verdict from run %d, but run %d is open", v.RunID, t.f.OpenRun.ID)
 		return
 	}
@@ -447,6 +455,18 @@ func (t *txn) intakeVerdict(v *IntakeVerdict) {
 	}
 	if len(missing) > 0 {
 		t.move(it, StateNeedsHuman, "Supersedes names tests that do not exist: "+strings.Join(missing, ", "), false)
+		return
+	}
+	// Sub-issue numbers are the worker's word; only ones GitHub lists as
+	// this issue's sub-issues may enter the loop.
+	var unknown []string
+	for _, n := range v.SubIssues {
+		if !slices.Contains(t.f.SubIssues, n) {
+			unknown = append(unknown, fmt.Sprintf("#%d", n))
+		}
+	}
+	if len(unknown) > 0 {
+		t.move(it, StateNeedsHuman, "intake reported sub-issues GitHub does not list under this issue: "+strings.Join(unknown, ", "), false)
 		return
 	}
 	t.move(it, StateAwaitingApproval, "criteria written", false)
