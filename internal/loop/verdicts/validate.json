@@ -1,0 +1,38 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["outcome", "summary", "tested_sha", "criteria", "regressions"],
+  "properties": {
+    "outcome": { "enum": ["pass", "fail", "undetermined"] },
+    "summary": { "type": "string", "maxLength": 2000 },
+    "tested_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "criteria": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "result", "evidence", "notes"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^AC-[0-9]+$" },
+          "result": { "enum": ["pass", "fail", "undetermined"] },
+          "evidence": { "type": "array", "items": { "type": "string", "maxLength": 500 } },
+          "notes": { "type": "string", "maxLength": 1000 }
+        }
+      }
+    },
+    "regressions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "result", "evidence", "notes"],
+        "properties": {
+          "name": { "type": "string", "maxLength": 500 },
+          "result": { "enum": ["pass", "fail", "undetermined"] },
+          "evidence": { "type": "array", "items": { "type": "string", "maxLength": 500 } },
+          "notes": { "type": "string", "maxLength": 1000 }
+        }
+      }
+    }
+  }
+}

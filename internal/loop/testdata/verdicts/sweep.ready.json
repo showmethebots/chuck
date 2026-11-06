@@ -1,0 +1,1 @@
+{"outcome":"ready","summary":"Swept.","head_sha":"0123456789abcdef0123456789abcdef01234567","findings":[{"category":"security","severity":"high","status":"fixed","summary":"Escaped output","url":"https://github.com/o/r/pull/13#discussion_r1"},{"category":"style","severity":"low","status":"declined","summary":"Rename"}],"blockers":[]}

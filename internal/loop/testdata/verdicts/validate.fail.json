@@ -1,0 +1,1 @@
+{"outcome":"fail","summary":"AC-1 fails.","tested_sha":"0123456789abcdef0123456789abcdef01234567","criteria":[{"id":"AC-1","result":"fail","evidence":["evidence/AC-1-empty.png"],"notes":"Shows a spinner forever"}],"regressions":[]}

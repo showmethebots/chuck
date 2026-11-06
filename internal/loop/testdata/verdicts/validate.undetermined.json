@@ -1,0 +1,1 @@
+{"outcome":"undetermined","summary":"Needs a payment.","tested_sha":"0123456789abcdef0123456789abcdef01234567","criteria":[{"id":"AC-1","result":"undetermined","evidence":[],"notes":"Needs a real card"}],"regressions":[{"name":"checkout smoke","result":"undetermined","evidence":[],"notes":"Flaky"}]}

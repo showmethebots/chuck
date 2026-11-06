@@ -1,0 +1,14 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["outcome", "summary", "pr_number", "tests_added", "tests_retired", "blockers", "skills_not_run"],
+  "properties": {
+    "outcome": { "enum": ["pr_opened", "blocked"] },
+    "summary": { "type": "string", "maxLength": 2000 },
+    "pr_number": { "type": ["integer", "null"], "minimum": 1 },
+    "tests_added": { "type": "array", "items": { "type": "string", "maxLength": 500 } },
+    "tests_retired": { "type": "array", "items": { "type": "string", "maxLength": 500 } },
+    "blockers": { "type": "array", "items": { "type": "string", "maxLength": 1000 } },
+    "skills_not_run": { "type": "array", "items": { "type": "string", "maxLength": 200 } }
+  }
+}

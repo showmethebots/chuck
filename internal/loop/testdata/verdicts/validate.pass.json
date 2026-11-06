@@ -1,0 +1,1 @@
+{"outcome":"pass","summary":"All pass.","tested_sha":"0123456789abcdef0123456789abcdef01234567","criteria":[{"id":"AC-1","result":"pass","evidence":["evidence/AC-1-empty.png"],"notes":""}],"regressions":[{"name":"e2e","result":"pass","evidence":[],"notes":""}]}

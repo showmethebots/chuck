@@ -138,6 +138,7 @@ in the spec's "Identities", "Who can merge", "The Claude proxy" and
 | `internal/web/**` | client-data, auth-session, authorization |
 | `internal/events/**` | secrets, client-data |
 | `internal/memory/**` | client-data |
+| `internal/loop/**` | authorization, client-data |
 | `cmd/**` | secrets, client-data |
 | `deploy/**` | auth-session, secrets, supply-chain |
 | `Dockerfile` | supply-chain, secrets |
