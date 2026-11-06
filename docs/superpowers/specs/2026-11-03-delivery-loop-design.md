@@ -183,23 +183,31 @@ Decisions:
 
 ```go
 type Input struct {
-    Kind    InputKind       // Webhook, Verdict, Dashboard, Tick
-    Webhook *WebhookInput   // event, action, label, sender id, numbers, sha, conclusion
-    Verdict *VerdictInput   // run id, stage, attempt, decoded verdict or error
-    Action  *DashboardInput // StartIntake, RunStage, Requeue, CloseOut, Approve, CancelRun; actor
-    Facts   Facts           // PR head sha, changed files, AC ids, counts the caller fetched
+    Kind    InputKind       // webhook, verdict, dashboard, tick
+    Webhook *WebhookInput   // event, action, label, sender id, number, sha, review state, workflow, branch, conclusion
+    Verdict *VerdictInput   // run id, stage, attempt, decoded verdict or error, same-attempt relaunch
+    Action  *DashboardInput // start_intake, approve, run_stage, approve_merge, promote, requeue,
+                            // close_out, cancel_run; actor and actor id
+    Facts   Facts           // what the caller fetched: PR head, changed files, chuck/loop status,
+                            // AC ids, sub-issues, counts, attempts, the open run
 }
 type Result struct {
-    State   State
-    Reason  string
-    Effects []Effect // SetLabel, Comment, Launch, SetStatus, EnableAutoMerge, Merge,
-                     // DispatchWorkflow, Mention, DestroyMachine, OpenRatchetIssue
+    Changes []Change // item, new state, escalated_from, pending stage, reason; ID 0 creates the item
+    Effects []Effect // state_label, mention, launch, set_status, enable_auto_merge,
+                     // dispatch_workflow, destroy_machine, open_ratchet_issue
+    Reason  string   // why nothing changed, when nothing did
 }
-func Transition(item Item, repo Repo, cfg LoopConfig, in Input, now time.Time) Result
+func Transition(item *Item, repo Repo, cfg *config.Loop, in Input, now time.Time) Result
 ```
 
 It reads nothing and calls nothing. Facts it needs from GitHub arrive in
-the input. Tests feed fixtures and assert states and effects.
+the input. One input can move several items (a PR and its issue, or a
+freed WIP slot starting the oldest `ready`), so the result is a list of
+changes. A merge is the effect `enable_auto_merge`, which falls back to a
+direct merge. A verdict counts only for the run that is open on the item;
+the caller ends that run in the same commit, so a duplicate or late
+verdict finds no open run and does nothing. Tests feed fixtures and assert
+changes and effects.
 
 ### States
 
@@ -215,8 +223,8 @@ Active states, which count against `wip_limit`: `building`, `review`,
 | Input | Condition | Transition |
 |---|---|---|
 | `issues.labeled loop:intake` by a human, dashboard Start intake, or the `OpenRatchetIssue` effect | no item yet | → `intake`, launch intake |
-| verdict intake `ready_for_approval` | issue has `AC-n` lines, or sub-issues were opened | → `awaiting-approval`; sub-issues → `awaiting-approval` |
-| verdict intake `needs_clarification` or no criteria | | → `needs-human` |
+| verdict intake `ready_for_approval` | issue has `AC-n` lines, or sub-issues were opened; every reported sub-issue is one GitHub lists under the issue, and every `Supersedes` target is a suite test | → `awaiting-approval`; sub-issues → `awaiting-approval` |
+| verdict intake `needs_clarification`, no criteria, an unlisted sub-issue or a missing `Supersedes` target | | → `needs-human` |
 | `issues.labeled loop:ready` by a human, or dashboard Approve | `awaiting-approval` | → `ready` |
 | tick, or any transition that frees WIP | oldest `ready`, active count < `wip_limit` | → `building`, launch build |
 | verdict build `pr_opened` | PR open, on the branch chuck named, opened by chuck's App, references the issue | issue → `in-pr`; PR item created → `review`, launch review |
@@ -226,10 +234,12 @@ Active states, which count against `wip_limit`: `building`, `review`,
 | verdict review `failed`, or rounds ≥ `review_rounds` | | → `needs-human` |
 | verdict sweep `changes_pushed` | | → `review`, launch review |
 | verdict sweep `ready` | head = reviewed sha, no open findings, no unfixed security findings, no risk paths, `auto_merge` | → `merging`, set `chuck/loop` success on the head and enable auto-merge (direct merge if GitHub refuses auto-merge on a clean PR) |
-| verdict sweep `ready` | head = reviewed sha, no open findings, no unfixed security findings, but a risk path or `auto_merge` off | → `awaiting-merge` with reasons; `chuck/loop` success, so a human can merge |
+| verdict sweep `ready` | head = reviewed sha, no open findings, no unfixed security findings, but a risk path | → `awaiting-merge` with reasons; `chuck/loop` pending ("waiting for human approval: risk paths …") |
+| verdict sweep `ready` | head = reviewed sha, no open findings, no unfixed security findings, no risk path, `auto_merge` off | → `awaiting-merge`; `chuck/loop` success, so a human can merge |
 | verdict sweep `ready` | open or unfixed findings | → `awaiting-merge` with reasons; `chuck/loop` failure |
 | verdict sweep `ready` | head moved since review | → `review`, launch review |
 | verdict sweep `cap_reached` or `blocked` | | → `needs-human` |
+| `pull_request_review` `approved` by a human, `pull_request.labeled loop:approve-merge` by a human, or dashboard Approve merge | `awaiting-merge` held for risk paths (`chuck/loop` pending, a risk path changed), PR open, approval for the head sha, head = reviewed sha | stays `awaiting-merge`; `chuck/loop` success on the head. A PR held for findings is not approvable: it needs another review |
 | `pull_request.synchronize` by a human | `review`, `sweep`, `awaiting-merge` | → `review`, launch review; `chuck/loop` pending on the new head |
 | `pull_request.closed` merged | `merging`, `awaiting-merge` | → `merged` |
 | `pull_request.closed` merged | any other PR state | PR and issue → `needs-human`, "merged outside the loop" |
@@ -243,7 +253,7 @@ Active states, which count against `wip_limit`: `building`, `review`,
 | `workflow_run deploy-prod` success | `promoting` | PR → `done`; issue → `done`; ratchet issue if `ratchet` is on and the issue is not itself a ratchet issue; start next ready |
 | `workflow_run deploy-prod` failure | `promoting` | → `needs-human` |
 | tick | active state older than `stale_hours` | → `needs-human` |
-| dashboard Re-queue | `needs-human` | → `escalated_from`, launch its stage |
+| dashboard Re-queue | `needs-human`, no run still open (a stale tick leaves the Machine running; Cancel run first), WIP room for an active state | → `escalated_from`, launch its stage |
 | dashboard Close out | `needs-human` | → `closed` |
 | dashboard Cancel run | a run is open | destroy Machine, `error` verdict, then the verdict rules apply |
 | anything else | | no transition; reason on the webhook row |
@@ -282,9 +292,20 @@ outside the prompt stop that:
   `chuck/loop` status, and lists no bypass actor, so chuck's App is bound
   by it too.
 - `chuck/loop` is a commit status that needs `statuses: write`. Worker
-  tokens never have it. chuck sets it `success` only in the transitions
-  above, so a PR cannot merge before the sweep verdict clears it, by
-  anyone.
+  tokens never have it. chuck sets it `success` only in the sweep-ready
+  transitions and on a human merge approval, so a PR cannot merge before
+  the sweep verdict clears it, by anyone.
+- A PR that touches a risk path stops at `awaiting-merge` with
+  `chuck/loop` pending. Only `CODEOWNERS` paths get a GitHub-enforced
+  human review, so without this a prompt-injected worker on a later stage
+  could merge a migration or a dependency change itself once the status
+  turned green. The status turns `success` only on a human approval of
+  the reviewed head: a review approval or a `loop:approve-merge` label
+  from a user in `humans`, or dashboard Approve merge. Approval of any
+  other sha is ignored, as is approval of a PR held for unfixed
+  findings (`chuck/loop` failure), which needs another review instead, and a human push resets the status to pending and
+  relaunches review. A push by anyone else leaves the new head with no
+  `chuck/loop` status, so it cannot merge.
 - `.claude/**` and `.github/**` are owned in `CODEOWNERS` and the ruleset
   requires code-owner review. They are risk paths that stop at
   `awaiting-merge` anyway; this makes a human review of a `loop.json`
@@ -709,7 +730,7 @@ executes nothing", routes and policy declarations, and per-tier budget
 rules go. New invariants: state is committed before effects; workers
 never hold chuck's App token or a Claude credential; no worker token
 carries `statuses`; the `chuck/loop` status is set `success` only by the
-sweep-ready transitions; the validator token is read-only; prompts carry
+sweep-ready transitions and human merge approval; the validator token is read-only; prompts carry
 feedback only from `humans` and chuck's App; `awaiting-approval` is
 always a human gate; `loop.json` is a risk path; evidence is never served
 inline except as sniffed image or plain-text types; additive migrations
