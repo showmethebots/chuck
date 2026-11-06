@@ -45,7 +45,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-          BASE: ${{ github.event.repository.default_branch }}
         run: |
           set -euo pipefail
           if git diff --quiet -- internal/github/hooks.txt; then
@@ -69,7 +68,7 @@ jobs:
           fi
           title="GitHub's webhook ranges changed"
           if [ -z "$(gh issue list --repo "$REPO" --state open --search "\"$title\" in:title" --json number --jq '.[].number')" ]; then
-            gh issue create --repo "$REPO" --title "$title" --body "GitHub's \`hooks\` list at https://api.github.com/meta no longer matches \`internal/github/hooks.txt\`. The update is on \`$branch\`: https://github.com/$REPO/compare/$BASE...$branch
+            gh issue create --repo "$REPO" --title "$title" --body "GitHub's \`hooks\` list at https://api.github.com/meta no longer matches \`internal/github/hooks.txt\`. The update is on \`$branch\`: https://github.com/$REPO/compare/$branch
 
           Open a PR from it and check the diff. An added range lets that range send webhooks; a removed one stops it. Opened by \`.github/workflows/hook-ranges.yml\`."
           fi
