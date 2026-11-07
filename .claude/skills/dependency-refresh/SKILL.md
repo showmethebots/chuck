@@ -8,7 +8,7 @@ description: >
   or to respond to a "dependency advisory", and before a release whose tree has
   not been refreshed.
 ---
-<!-- vendored from @cwinters8/agent-skills@2.8.0 — edit upstream, then re-run the sync -->
+<!-- vendored from @cwinters8/agent-skills@2.9.0 — edit upstream, then re-run the sync -->
 
 # Dependency refresh
 

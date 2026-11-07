@@ -12,7 +12,7 @@ description: >
   firewall exposure", "is this server hardened", "what is exposed to the
   internet", or "pre-launch security check".
 ---
-<!-- vendored from @cwinters8/agent-skills@2.8.0 — edit upstream, then re-run the sync -->
+<!-- vendored from @cwinters8/agent-skills@2.9.0 — edit upstream, then re-run the sync -->
 
 # Security review
 

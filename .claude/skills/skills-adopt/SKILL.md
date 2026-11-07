@@ -8,7 +8,7 @@ description: >
   to "adopt the skills", "set up agent-skills in this repo", "vendor the
   skills", "add a skill", or "bump the skills ref".
 ---
-<!-- vendored from @cwinters8/agent-skills@2.8.0 — edit upstream, then re-run the sync -->
+<!-- vendored from @cwinters8/agent-skills@2.9.0 — edit upstream, then re-run the sync -->
 
 # Adopting the skills
 

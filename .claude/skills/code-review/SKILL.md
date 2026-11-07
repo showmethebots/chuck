@@ -8,7 +8,7 @@ description: >
   when asked to "code review", "review this change", "review PR <n>", or when
   another skill invokes code-review.
 ---
-<!-- vendored from @cwinters8/agent-skills@2.8.0 — edit upstream, then re-run the sync -->
+<!-- vendored from @cwinters8/agent-skills@2.9.0 — edit upstream, then re-run the sync -->
 
 # Code review
 

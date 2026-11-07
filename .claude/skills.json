@@ -9,16 +9,18 @@
     "profile-refresh",
     "review-sweep",
     "security-review",
-    "skills-adopt"
+    "skills-adopt",
+    "pr-review-cycle",
+    "pr-handoff"
   ],
-  "version": "2.8.0",
+  "version": "2.9.0",
   "files": {
     "action-versions/SKILL.md": "925b835f5a32d6c4e1373bfd70395dbdcf3e7fd93c0a168945f3237f37aeeede",
     "code-review/SKILL.md": "a54b9a35b1d6d507520f54ff97cd152b99e88c9ddecf90dcdd2afd052f552f19",
     "dependency-refresh/SKILL.md": "d967945f1ca9b2604e76d7a07f16ccc4af9b2fb4963e3dc5e625a1f1c8b0b95a",
     "docs-currency/SKILL.md": "59d41dbc4ffdd9f78d4159a3742e5662cbd82c5239965c8982d59ff3222ed78e",
-    "pr-preflight/SKILL.md": "e9c282619cfb5728266e994ac39ca1a9357d63c86ef012cfb859dad5205328ef",
-    "pr-review/SKILL.md": "56fbea876233a1287dfc01a46067019d8b209b995d96e50785823438126174af",
+    "pr-preflight/SKILL.md": "9171fc067523682e9b4f95242b08bce0322e8c2e4e2a96db9c9f6ab3b50adbe2",
+    "pr-review/SKILL.md": "5fc5b3448c898c2e0cba234e2b6a73fdf75b81fce7b2452b43d19d6bc9cadee7",
     "profile-refresh/SKILL.md": "72ca238eefbff587af690161dc22ba813067563fdce757a94dc03dc08a31f033",
     "review-sweep/SKILL.md": "2d0d0579d9c9050ba9e0a85523d8a714609d50a49a6daa70dd4fd501c971eb04",
     "security-review/SKILL.md": "72810597543cfefdf296ac662e226c16c163a83accf4ac071a7c723956038732",
@@ -28,6 +30,10 @@
     "security-review/references/infra-provisioning.md": "8b0be4973f33332536da22079732e15a7668b2dbb321695e82b2fa1f475b25ae",
     "security-review/references/mobile-release.md": "b4b42c080047319513c3092ef51f49dc016e55489128e8667600935666307faa",
     "security-review/references/postgres-rls.md": "3cecf3dad2143c9bfc96857cbfe76336eae5a4313e89c89db6a321e7f3439207",
-    "skills-adopt/SKILL.md": "62b8b15157b8513df5136b2223c5b12665e25dab128c31571d67aafadb9aa15c"
+    "skills-adopt/SKILL.md": "62b8b15157b8513df5136b2223c5b12665e25dab128c31571d67aafadb9aa15c",
+    "pr-review-cycle/SKILL.md": "c6131c846f33c42ad2b92ddf0370b72e9009df8654dd357f706ca885a8aa8c2b",
+    "pr-handoff/SKILL.md": "a2fc2206962f316423805e5115f74f7cd02809d251a307e74013786534db4e7e",
+    "pr-handoff/example.md": "11e3d448a3ef062c8d41438b6bb70f911935bd2a132d9c07610ec9396d93a3a0",
+    "pr-handoff/templates/pr-map.html": "f6b90a3a4f879b579e00ed906ff803d275b0eed0f3774843dfd4667b42e5355c"
   }
 }

@@ -8,7 +8,7 @@ description: >
   scheduled routine invokes /review-sweep. Accepts an optional PR number as
   argument; with no argument it sweeps every open PR.
 ---
-<!-- vendored from @cwinters8/agent-skills@2.8.0 — edit upstream, then re-run the sync -->
+<!-- vendored from @cwinters8/agent-skills@2.9.0 — edit upstream, then re-run the sync -->
 
 # Review sweep
 
