@@ -45,8 +45,8 @@ true, not before.
   held for risk paths. A PR that touches a risk path holds it pending
   until that approval; a PR held for findings cannot be approved past
   them. The hold exists because
-  `CODEOWNERS` covers only `.claude/**` and `.github/**` and worker tokens
-  can call the merge API.
+  a consumer repo's `CODEOWNERS` covers only `.claude/**` and `.github/**`
+  and worker tokens can call the merge API.
 - **`loop.Transition` does no I/O.** It decides from the item, the repo,
   the config, the input and the `Facts` the caller gathered, and returns
   changes and effects. The package imports no network, database or
