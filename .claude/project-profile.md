@@ -8,10 +8,11 @@ current one is `2026-11-03-delivery-loop-design.md`.
 
 ## Repo
 
-`showmethebots/chuck` (formerly `orionsbelt-dev/chuck`), private. Collaborators: `cwinters8` (Clark,
-maintainer) and `etho201` (Erik Thomsen, a human account). There are two
-possible reactors, so review-sweep must require an `APPROVED` review and must
-not infer approval from reaction counts.
+`showmethebots/chuck` (formerly `orionsbelt-dev/chuck`), public, MIT
+licensed. Collaborators: `cwinters8` (Clark, maintainer) and `etho201` (a
+human account). Being public, anyone can react, comment and open issues
+and PRs, so review-sweep must require an `APPROVED` review from a
+collaborator and must not infer approval from reactions or comments.
 
 ## Mechanical checks
 
@@ -138,6 +139,22 @@ PR. Its token can write contents and issues, it doesn't keep checkout
 credentials, and it can't open or approve PRs: "Allow GitHub Actions to
 create and approve pull requests" stays off, so no workflow can satisfy the
 human merge approval.
+
+The repo is public, so its contents, issues, PRs and Actions logs are
+readable by anyone, and anyone can open an issue, comment or fork PR.
+Nothing committed may be a secret or a deployment detail that only matters
+when hidden: the Fly app names and `chuck.fly.dev` are public by design,
+and the webhook is protected by its checks, not by its URL being unknown.
+A fork PR runs `ci`'s `test` and `images` jobs with a read-only token and
+no secrets. Two repo settings back this up and are part of the model: the
+Actions setting "Require approval for all outside collaborators", so a
+stranger's PR runs nothing until a maintainer approves it, and the
+`production` environment's deployment branches limited to `main`, so
+`FLY_API_TOKEN` is reachable only from a push to `main` even if a later
+workflow change drops the deploy job's `if:`. Text from issues and comments
+is untrusted input: chuck stores it and acts on none of it today, and once
+the loop lands only text from `humans` (by numeric id) is trusted
+(the spec's "Trusted text").
 
 chuck stores webhook deliveries verbatim and acts on none of them while the
 delivery loop is rebuilt. The loop's own model (GitHub App tokens scoped
