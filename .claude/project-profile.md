@@ -36,6 +36,10 @@ make skills-check
 | `cmd/chuck/main.go` `retiredConfig` | `config/README.md` |
 | `cmd/chuck/main.go` (env vars and defaults) | its package doc comment, `Dockerfile` `ENV`, `deploy/entrypoint.sh`, `deploy/litestream.yml`, `deploy/smoke-restore.sh`, `deploy/fly.toml` `[env]`, `Makefile` `run`, `docs/phase-1-human-steps.md` (secret and env names), `.env.example` (names checked against the doc comment by `cmd/chuck/dotenv_test.go`), `README.md` "Running locally" |
 | `Makefile` targets | `README.md` "Development", this profile's `## Mechanical checks` |
+| `AGENTS.md` invariants, `internal/github/webhook.go` (the order and scope of the webhook checks), `internal/github/app.go` `StagePermissions`, `.github/workflows/hook-ranges.yml` | `README.md` "Design choices worth a look" |
+| Top-level and `internal/` directories, `cmd/chuck` subcommands | `README.md` "Layout" |
+| `internal/loop/types.go` states | `README.md` "The loop" diagram |
+| Current and retired specs and plans in `docs/superpowers/` | `docs/superpowers/README.md` |
 | `.github/workflows/ci.yml` checks | this profile's `## Mechanical checks` |
 | `Makefile` `AGENT_SKILLS` (the agent-skills ref) | `AGENTS.md` conventions (pin a commit, not a tag), this profile's `## Dependencies` |
 | Current phase | `README.md` status line, `deploy/worker.Dockerfile` header comment |
@@ -147,7 +151,7 @@ when hidden: the Fly app names and `chuck.fly.dev` are public by design,
 and the webhook is protected by its checks, not by its URL being unknown.
 A fork PR runs `ci`'s `test` and `images` jobs with a read-only token and
 no secrets. Two repo settings back this up and are part of the model: the
-Actions setting "Require approval for all outside collaborators", so a
+Actions setting "Require approval for all external contributors", so a
 stranger's PR runs nothing until a maintainer approves it, and the
 `production` environment's deployment branches limited to `main`, so
 `FLY_API_TOKEN` is reachable only from a push to `main` even if a later

@@ -17,7 +17,8 @@ and a person approves anything risky.**
 > prompts and verdict schemas, and the GitHub client with a hardened
 > webhook receiver. The pieces that make it run end to end (the executor,
 > worker launcher, Claude proxy and dashboard) are still being built, so
-> chuck does not yet move real issues. Progress is tracked on issue #17.
+> chuck does not yet move real issues. Progress is tracked on
+> [issue #17](https://github.com/showmethebots/chuck/issues/17).
 > Production today serves `/healthz` and stores signed GitHub webhook
 > deliveries without acting on them.
 
@@ -63,7 +64,7 @@ escalation, is in the
 | --- | --- | --- |
 | `internal/loop` | `Transition` is a pure function: item, config, input and gathered facts in; state changes and effects out. | Every rule is a table test. `TestPackageImportsNoIO` fails the build if the package imports a network, database or filesystem package. |
 | `internal/loop` | Risk-path hold. `chuck/loop` turns `success` only on a clean sweep or a human approval of the reviewed head. | A later, prompt-injected stage cannot merge a migration once checks go green. Approval of any other commit is ignored. |
-| `internal/github` | Webhooks are checked against GitHub's published `hooks` IP ranges before the body is read, then by HMAC signature, then the signed payload must match the unsigned event header. | Layers fail closed: an empty secret rejects everything, and a captured body cannot be replayed as a different event. |
+| `internal/github` | Webhooks are checked against GitHub's published `hooks` IP ranges before the body is read, then by HMAC signature. For the events the loop acts on, the signed payload must also match the unsigned event header. | Layers fail closed: an empty secret rejects everything, and a captured body cannot be replayed as one of the events the loop acts on. |
 | `.github/workflows/hook-ranges.yml` | A weekly job compares the built-in IP list with GitHub's and opens an *issue*, not a PR. | Actions never gets permission to create or approve PRs, so no workflow can satisfy the human merge approval. |
 | `internal/github` | Worker tokens are minted per stage from a fixed permission set, and a token returned with any extra permission is refused. Symlinks are never followed when reading `loop.json`. | Least privilege per run, checked rather than assumed. |
 | `internal/memory` | Run tokens and session cookies are stored only as sha256. SQLite runs in WAL mode on one connection, replicated by Litestream. | A copy of the database or its backup holds no usable credential. |
