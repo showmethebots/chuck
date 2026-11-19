@@ -92,7 +92,7 @@ func (d *Server) integrations() []string {
 // server bounds how long a client may take to send a request. ReadTimeout
 // covers the body for every route except the GitHub webhook, which bounds
 // the wait for a read slot and replaces the read deadline with its own
-// 10 s once it holds one (see events.GitHub).
+// 10 s once it holds one (see github.Receiver).
 func (d *Server) server() *http.Server {
 	return &http.Server{
 		Handler:           d.Handler(),

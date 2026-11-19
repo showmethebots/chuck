@@ -143,6 +143,12 @@ type WebhookInput struct {
 	Workflow   string // the workflow file name or name, matched against loop.json deploy
 	Branch     string
 	Conclusion string // success, failure, cancelled, ...
+	// RunEvent is what triggered the run (push, workflow_dispatch, or
+	// pull_request for a fork's run), and SameRepo that the run's head
+	// repository is this repository. A fork can name its branch main and
+	// reuse a workflow name, so the branch alone proves nothing.
+	RunEvent string
+	SameRepo bool
 }
 
 // VerdictInput is a worker's report, or chuck's own error for a run that

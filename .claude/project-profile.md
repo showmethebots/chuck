@@ -59,7 +59,8 @@ make skills-check
   `skills-adopt` skill's "Bumping the pinned ref" steps.
 - **Alpine and apt packages:** `ca-certificates`, `git` and `openssh-client`.
   These are unpinned.
-- **CI:** GitHub Actions are SHA-pinned in `.github/workflows/ci.yml`.
+- **CI:** GitHub Actions are SHA-pinned in `.github/workflows/ci.yml` and
+  `.github/workflows/hook-ranges.yml`.
   golangci-lint is pinned to `v2.14.0` in the same file.
   `superfly/flyctl-actions/setup-flyctl` is held at tag `1.6` on purpose. The
   latest release, 1.5, runs on node20, which hosted runners no longer support.
@@ -104,23 +105,39 @@ to `main` deploys to production through the `production` environment.
 The repo ships a container image to a single Fly Machine (`chuck`). Its
 inbound surfaces are the unauthenticated `GET /healthz` behind Fly's HTTPS
 proxy (version and boot count only) and `POST /webhooks/github`
-(`internal/events`), which verifies GitHub's `X-Hub-Signature-256` with
-HMAC-SHA256 against `GITHUB_APP_WEBHOOK_SECRET` — an empty secret rejects
-every request rather than opening the endpoint — caps the body at 25 MB,
+(`internal/github`). The webhook first checks `Fly-Client-IP` against the
+`hooks` ranges of `https://api.github.com/meta` (fetched at startup and
+daily, keeping the last good list, built-in `internal/github/hooks.txt`
+until the first fetch succeeds; every change is logged with the ranges
+added and removed, and the weekly `hook-ranges` workflow pushes a
+`hooks.txt` update to a branch and opens an issue for a person to PR) and answers 403 before reading the body or taking a read slot
+when the sender is outside them or the header is missing or repeated.
+`CHUCK_WEBHOOK_ALLOW_ANY_IP=1` skips that check for local runs behind a
+tunnel and is logged at Warn on startup; it must never be set in
+production. It then verifies GitHub's `X-Hub-Signature-256` with
+HMAC-SHA256 against `GITHUB_APP_WEBHOOK_SECRET` (an empty secret rejects
+every request rather than opening the endpoint), caps the body at 25 MB,
 reads at most 2 bodies at once into exactly-sized buffers, and bounds both
 the wait for a read slot (then 503) and the read itself (then 408) at 10 s.
-The body is read before the
-signature can be checked, so unsigned senders can still cause memory
-pressure (measured locally at about 127 MB peak against the 512 MB
-Machine) and can occupy both read slots; turning away non-GitHub senders
-before reading is the complete fix (issue #6). chuck makes no outbound
-calls today. What matters is the Fly app, its
+The range check rests on Fly's proxy setting `Fly-Client-IP` itself. A
+request that skips the proxy, such as one from another Machine in the same
+Fly organization over the private network, can set the header, but that
+only costs a read slot: it does not get past the signature check. For the
+events the loop acts on, the signed payload must also match the unsigned
+`X-GitHub-Event` header, so a captured body cannot be replayed as another
+event. chuck's outbound calls are GitHub's meta endpoint
+and, once the executor lands, the GitHub API with the App's tokens. What matters is the Fly app, its
 volume, and the Tigris bucket holding the replicated state. The control
 that guards them is credential custody. `FLY_API_TOKEN` is an app-scoped
 deploy token that only the CI `deploy` job can reach, through the
 `production` GitHub environment. The Tigris keys are Fly app secrets that
-never enter the repo. The workflow runs on `pull_request` and its token is
-`contents: read`, so a fork PR can't reach either credential.
+never enter the repo. The `ci` workflow runs on `pull_request` and its token
+is `contents: read`, so a fork PR can't reach either credential. The
+`hook-ranges` workflow runs only on a schedule or by dispatch, never on a
+PR. Its token can write contents and issues, it doesn't keep checkout
+credentials, and it can't open or approve PRs: "Allow GitHub Actions to
+create and approve pull requests" stays off, so no workflow can satisfy the
+human merge approval.
 
 chuck stores webhook deliveries verbatim and acts on none of them while the
 delivery loop is rebuilt. The loop's own model (GitHub App tokens scoped
@@ -136,7 +153,7 @@ in the spec's "Identities", "Who can merge", "The Claude proxy" and
 | `config/**` | authorization |
 | `internal/config/**` | authorization |
 | `internal/web/**` | client-data, auth-session, authorization |
-| `internal/events/**` | secrets, client-data |
+| `internal/github/**` | secrets, authorization, client-data |
 | `internal/memory/**` | client-data |
 | `internal/loop/**` | authorization, client-data |
 | `cmd/**` | secrets, client-data |

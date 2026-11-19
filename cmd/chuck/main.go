@@ -14,6 +14,8 @@
 //	CHUCK_HEARTBEAT            heartbeat interval as a Go duration (default 1m)
 //	PORT                       HTTP listen port (default 8080)
 //	GITHUB_APP_WEBHOOK_SECRET  turns on POST /webhooks/github; deliveries must be signed with it
+//	CHUCK_WEBHOOK_ALLOW_ANY_IP 1 accepts deliveries from any IP, for local development through a
+//	                           tunnel; otherwise Fly-Client-IP must be in GitHub's hook ranges
 package main
 
 import (
@@ -24,6 +26,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -33,7 +36,7 @@ import (
 	"github.com/joho/godotenv"
 
 	"github.com/showmethebots/chuck/internal/config"
-	"github.com/showmethebots/chuck/internal/events"
+	"github.com/showmethebots/chuck/internal/github"
 	"github.com/showmethebots/chuck/internal/memory"
 	"github.com/showmethebots/chuck/internal/web"
 )
@@ -169,7 +172,16 @@ func runServer(ctx context.Context, log *slog.Logger, getenv func(string) string
 		Integrations: integrations(secret),
 	}
 	if secret != "" {
-		srv.Webhook = &events.GitHub{Secret: []byte(secret), Store: store, Log: log}
+		rcv := &github.Receiver{Secret: []byte(secret), Store: store, Log: log}
+		if getenv("CHUCK_WEBHOOK_ALLOW_ANY_IP") == "1" {
+			rcv.AllowAnyIP = true
+			log.Warn("CHUCK_WEBHOOK_ALLOW_ANY_IP=1: webhooks are accepted from ANY IP address, not only GitHub's. " +
+				"Local development only; never set this in production.")
+		} else {
+			rcv.Allow = github.NewAllowlist()
+			go rcv.Allow.Run(ctx, log, &http.Client{Timeout: 30 * time.Second}, github.MetaURL, 24*time.Hour)
+		}
+		srv.Webhook = rcv
 	}
 	return srv.Run(ctx, ln)
 }

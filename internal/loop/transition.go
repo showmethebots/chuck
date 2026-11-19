@@ -348,6 +348,10 @@ func (t *txn) workflowRun(item *Item, w WebhookInput) {
 		t.skip("workflow run on %s", w.Branch)
 		return
 	}
+	if !w.SameRepo || (w.RunEvent != "push" && w.RunEvent != "workflow_dispatch") {
+		t.skip("workflow run from %s, not a push or dispatch in this repository", w.RunEvent)
+		return
+	}
 	ok := w.Conclusion == "success"
 	switch {
 	case w.Workflow == t.cfg.Deploy.DevWorkflow && item.State == StateMerged:

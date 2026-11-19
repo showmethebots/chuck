@@ -296,6 +296,8 @@ func TestTransitionTable(t *testing.T) {
 				w.Workflow = "deploy-dev"
 				w.SHA = merge
 				w.Branch = "main"
+				w.RunEvent = "push"
+				w.SameRepo = true
 				w.Conclusion = "success"
 			}), Facts{ActiveCount: 1, PR: mergedPR()}),
 			moves: []string{"pr#13:validating"}, effects: []string{"launch:validate"}},
@@ -304,6 +306,8 @@ func TestTransitionTable(t *testing.T) {
 				w.Workflow = "deploy-dev"
 				w.SHA = merge
 				w.Branch = "main"
+				w.RunEvent = "push"
+				w.SameRepo = true
 				w.Conclusion = "failure"
 			}), Facts{ActiveCount: 1, PR: mergedPR()}),
 			moves: []string{"pr#13:needs-human"}},
@@ -355,6 +359,8 @@ func TestTransitionTable(t *testing.T) {
 			in: withFacts(webhook("workflow_run", "completed", func(w *WebhookInput) {
 				w.Workflow = "deploy-prod"
 				w.Branch = "main"
+				w.RunEvent = "push"
+				w.SameRepo = true
 				w.SHA = merge
 				w.Conclusion = "success"
 			}), Facts{ActiveCount: 1, PR: mergedPR(), Linked: issue(12, StateInPR)}),
@@ -362,10 +368,30 @@ func TestTransitionTable(t *testing.T) {
 		{name: "deploy-prod with no branch", item: pr(13, 12, StatePromoting),
 			in:     withFacts(webhook("workflow_run", "completed", func(w *WebhookInput) { w.Workflow = "deploy-prod"; w.SHA = merge; w.Conclusion = "success" }), Facts{ActiveCount: 1, PR: mergedPR()}),
 			reason: "workflow run on"},
+		{name: "deploy-prod from a fork named main", item: pr(13, 12, StatePromoting),
+			in: withFacts(webhook("workflow_run", "completed", func(w *WebhookInput) {
+				w.Workflow = "deploy-prod"
+				w.Branch = "main"
+				w.RunEvent = "pull_request"
+				w.SHA = merge
+				w.Conclusion = "success"
+			}), Facts{ActiveCount: 1, PR: mergedPR()}),
+			reason: "not a push or dispatch"},
+		{name: "deploy-dev pushed from another repository", item: pr(13, 12, StateMerged),
+			in: withFacts(webhook("workflow_run", "completed", func(w *WebhookInput) {
+				w.Workflow = "deploy-dev"
+				w.Branch = "main"
+				w.RunEvent = "push"
+				w.SHA = merge
+				w.Conclusion = "success"
+			}), Facts{ActiveCount: 1, PR: mergedPR()}),
+			reason: "not a push or dispatch in this repository"},
 		{name: "deploy-prod failure", item: pr(13, 12, StatePromoting),
 			in: withFacts(webhook("workflow_run", "completed", func(w *WebhookInput) {
 				w.Workflow = "deploy-prod"
 				w.Branch = "main"
+				w.RunEvent = "push"
+				w.SameRepo = true
 				w.SHA = merge
 				w.Conclusion = "failure"
 			}), Facts{ActiveCount: 1, PR: mergedPR()}),
@@ -401,6 +427,8 @@ func TestWIPReleaseStartsOldestReady(t *testing.T) {
 		in: withFacts(webhook("workflow_run", "completed", func(w *WebhookInput) {
 			w.Workflow = "deploy-prod"
 			w.Branch = "main"
+			w.RunEvent = "push"
+			w.SameRepo = true
 			w.SHA = merge
 			w.Conclusion = "success"
 		}),
@@ -520,6 +548,8 @@ func TestRatchetItemOpensNoRatchet(t *testing.T) {
 		in: withFacts(webhook("workflow_run", "completed", func(w *WebhookInput) {
 			w.Workflow = "deploy-prod"
 			w.Branch = "main"
+			w.RunEvent = "push"
+			w.SameRepo = true
 			w.SHA = merge
 			w.Conclusion = "success"
 		}), Facts{ActiveCount: 1, PR: mergedPR(), Linked: ratchet}),
@@ -528,6 +558,8 @@ func TestRatchetItemOpensNoRatchet(t *testing.T) {
 		in: withFacts(webhook("workflow_run", "completed", func(w *WebhookInput) {
 			w.Workflow = "deploy-prod"
 			w.Branch = "main"
+			w.RunEvent = "push"
+			w.SameRepo = true
 			w.SHA = merge
 			w.Conclusion = "success"
 		}), Facts{ActiveCount: 1, PR: mergedPR(), Linked: issue(12, StateInPR)}),
