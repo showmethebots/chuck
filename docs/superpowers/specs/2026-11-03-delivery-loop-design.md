@@ -72,7 +72,8 @@ document and its successors in `docs/superpowers/specs/` are.
 | Package | Does | Replaces |
 |---|---|---|
 | `internal/github` | App auth (JWT, installation tokens scoped per call), the REST calls the loop makes, the webhook receiver | `internal/events`, octokit in the sketch |
-| `internal/loop` | `Transition(item, repo, cfg, input, now) Result`, the effect executor, WIP and stale rules, embedded prompts and verdict schemas | `loop/dispatch.cjs`, `prep.sh` |
+| `internal/loop` | `Transition(item, repo, cfg, input, now) Result`, WIP and stale rules, embedded prompts and verdict schemas | `loop/dispatch.cjs`, `prep.sh` |
+| `internal/engine` | Webhook mapping, facts, the effect executor, the tick (reconciliation, retries, label drift), `loop.json` discovery | `loop/dispatch.cjs`, `prep.sh` |
 | `internal/worker` | Launch a Machine with a run token; serve it the spec and short-lived GitHub tokens; watch; stop and destroy; accept the callback; filter trusted text | `claude-code-action` |
 | `internal/web` | OAuth login, sessions, CSRF, dashboard pages, worker API, the Claude proxy, `/healthz`, webhook mount | `internal/notify`, `internal/daemon` |
 | `internal/memory` | SQLite as today, migration `0004_loop.sql` | same package |
@@ -96,7 +97,12 @@ gains Playwright, Chromium and `chuck-worker`.
   takes effect on the next event. It is a risk path and never auto-merges.
 - `deploy-dev` (on push to main) and `deploy-prod` (`workflow_dispatch`
   with a `sha` input, behind a `production` environment). chuck does not
-  deploy; it dispatches and watches `workflow_run`.
+  deploy; it dispatches and watches `workflow_run`. A dispatched run's
+  `head_sha` is the branch tip at dispatch, not the sha it deploys, so
+  `deploy-prod` must name that sha in its run name
+  (`run-name: Deploy ${{ inputs.sha }}`). chuck matches a dispatched run
+  by the one full sha in its title, and only if it was created after the
+  PR reached `promoting`.
 - Vendored skills and `.claude/project-profile.md` as now.
 
 The consumer `loop.yml` from the Notion spec does not exist.
@@ -166,7 +172,9 @@ Decisions:
 
 - `items.state` is the answer; `transitions` is the history. The executor
   writes both in one transaction before any GitHub call, so chuck is never
-  behind its own database. Label drift is repaired on the tick.
+  behind its own database. Label drift is repaired on the tick, and an
+  approval label (`loop:approve-merge`, `loop:approve-prod`) is removed
+  once the item leaves the state it approves.
 - Verdicts are rows. Attempt and round caps count `DISTINCT attempt` over
   `runs` per item and stage. A relaunch keeps its attempt number when the
   Machine never started or the credential was exhausted; a run that
@@ -179,7 +187,8 @@ Decisions:
 
 ## Loop engine
 
-`internal/loop` is a pure transition function plus an executor.
+`internal/loop` is a pure transition function; `internal/engine` commits
+its result and runs the effects.
 
 ```go
 type Input struct {
@@ -301,7 +310,10 @@ outside the prompt stop that:
   could merge a migration or a dependency change itself once the status
   turned green. The status turns `success` only on a human approval of
   the reviewed head: a review approval or a `loop:approve-merge` label
-  from a user in `humans`, or dashboard Approve merge. Approval of any
+  from a user in `humans`, or dashboard Approve merge. The label names
+  no sha, so the tick replays it only when it was added after the PR
+  reached `awaiting-merge`; one left from an earlier head approves
+  nothing. Approval of any
   other sha is ignored, as is approval of a PR held for unfixed
   findings (`chuck/loop` failure), which needs another review instead, and a human push resets the status to pending and
   relaunches review. A push by anyone else leaves the new head with no

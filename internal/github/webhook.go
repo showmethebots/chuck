@@ -35,9 +35,9 @@ const defaultBodyTimeout = 10 * time.Second
 // because GitHub does not retry failed App deliveries.
 const maxInFlight = 2
 
-// ResultNoLoop is the result recorded on deliveries received before the
-// loop reads them.
-const ResultNoLoop = "stored; no loop yet"
+// ResultNoLoop is the result recorded on deliveries received while the
+// loop is off.
+const ResultNoLoop = "stored; the loop is off"
 
 // GitHubStore is the part of memory.Store the webhook needs.
 type GitHubStore interface {
@@ -47,7 +47,7 @@ type GitHubStore interface {
 // Receiver receives GitHub App webhook deliveries. It turns away senders
 // outside GitHub's hook ranges before reading anything, verifies the
 // signature, stores the delivery verbatim, and returns 202. The loop reads
-// stored deliveries on its own (#26).
+// stored deliveries on its own.
 type Receiver struct {
 	Secret []byte
 	Store  GitHubStore
@@ -58,8 +58,14 @@ type Receiver struct {
 	// AllowAnyIP skips the range check, for local development through a
 	// tunnel (CHUCK_WEBHOOK_ALLOW_ANY_IP=1). The signature is still checked.
 	AllowAnyIP bool
-	Log        *slog.Logger
-	Now        func() time.Time // nil means time.Now
+	// Notify, when set, means the loop is on: deliveries are stored
+	// unhandled for it, and Notify is called after each new one so the
+	// loop reads it now rather than on its next tick. Nil stores each
+	// delivery as already handled with ResultNoLoop, so turning the loop on
+	// later does not replay what arrived while it was off.
+	Notify func()
+	Log    *slog.Logger
+	Now    func() time.Time // nil means time.Now
 	// BodyTimeout bounds how long a request may wait for a read slot and then
 	// how long it may hold one; 0 means 10 s.
 	BodyTimeout time.Duration
@@ -156,7 +162,7 @@ func (g *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// X-GitHub-Event is not signed, so a captured body could be replayed
 	// under another event name. For the events the loop acts on, the
 	// signed payload must have that event's shape.
-	if !payloadMatchesEvent(name, body) {
+	if !PayloadMatchesEvent(name, body) {
 		g.Log.Warn("github webhook rejected", "reason", "payload does not match X-GitHub-Event", "event", name, "delivery", delivery)
 		http.Error(w, "payload does not match X-GitHub-Event", http.StatusBadRequest)
 		return
@@ -165,12 +171,8 @@ func (g *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if meta.Action != "" {
 		kind += "." + meta.Action
 	}
-	// Nothing reads deliveries until the executor lands (#26), so each is
-	// stored as already handled. Otherwise the loop's first boot would
-	// replay every delivery since this deploy as work a crash left behind.
-	// #26 removes HandledAt and Result here.
 	at := g.now()
-	id, inserted, err := g.Store.InsertWebhook(r.Context(), memory.Webhook{
+	row := memory.Webhook{
 		DeliveryID:  delivery,
 		Event:       name,
 		Action:      meta.Action,
@@ -179,9 +181,11 @@ func (g *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		SenderLogin: meta.Sender.Login,
 		Payload:     body,
 		ReceivedAt:  at,
-		HandledAt:   at,
-		Result:      ResultNoLoop,
-	})
+	}
+	if g.Notify == nil {
+		row.HandledAt, row.Result = at, ResultNoLoop
+	}
+	id, inserted, err := g.Store.InsertWebhook(r.Context(), row)
 	if err != nil {
 		g.Log.Error("store github webhook", "delivery", delivery, "err", err.Error())
 		http.Error(w, "store failed", http.StatusInternalServerError)
@@ -190,6 +194,9 @@ func (g *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	g.Log.Info("github webhook", "webhook_id", id, "kind", kind, "repo", meta.Repository.FullName,
 		"delivery", delivery, "duplicate", !inserted)
 	w.WriteHeader(http.StatusAccepted)
+	if inserted && g.Notify != nil {
+		g.Notify()
+	}
 }
 
 // readBody reads the request body into a single buffer. With a
@@ -254,7 +261,10 @@ var eventShape = map[string]struct{ has, lacks []string }{
 	"workflow_run":        {has: []string{"workflow_run"}},
 }
 
-func payloadMatchesEvent(event string, body []byte) bool {
+// PayloadMatchesEvent reports whether a signed payload has the shape of
+// the event its unsigned X-GitHub-Event header names. The loop checks it
+// again before acting on a stored delivery.
+func PayloadMatchesEvent(event string, body []byte) bool {
 	shape, ok := eventShape[event]
 	if !ok {
 		return true

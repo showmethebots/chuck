@@ -85,3 +85,25 @@ func (s *Store) DeleteWebhooksBefore(ctx context.Context, cutoff time.Time) (int
 	}
 	return res.RowsAffected()
 }
+
+// WebhookByID returns one delivery with how it was handled.
+func (s *Store) WebhookByID(ctx context.Context, id int64) (Webhook, error) {
+	var w Webhook
+	var received string
+	var handled sql.NullString
+	err := s.db.QueryRowContext(ctx, `SELECT id, delivery_id, event, action, repo, sender_id,
+		sender_login, payload, received_at, handled_at, result FROM webhooks WHERE id = ?`, id).Scan(
+		&w.ID, &w.DeliveryID, &w.Event, &w.Action, &w.Repo, &w.SenderID, &w.SenderLogin, &w.Payload,
+		&received, &handled, &w.Result)
+	if errors.Is(err, sql.ErrNoRows) {
+		return w, ErrNotFound
+	}
+	if err != nil {
+		return w, err
+	}
+	if w.ReceivedAt, err = parseTS(received); err != nil {
+		return w, err
+	}
+	w.HandledAt, err = scanTS(handled)
+	return w, err
+}

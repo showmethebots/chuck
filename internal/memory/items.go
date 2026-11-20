@@ -72,6 +72,12 @@ func scanRepo(row interface{ Scan(...any) error }) (Repo, error) {
 	return r, err
 }
 
+// SetRepoEnabled turns the loop on or off for a repo.
+func (s *Store) SetRepoEnabled(ctx context.Context, repoID int64, enabled bool) error {
+	res, err := s.db.ExecContext(ctx, `UPDATE repos SET enabled = ? WHERE id = ?`, enabled, repoID)
+	return oneRow(res, err)
+}
+
 // RepoByName finds a repo by owner and name, case-insensitively.
 func (s *Store) RepoByName(ctx context.Context, owner, name string) (Repo, error) {
 	return scanRepo(s.db.QueryRowContext(ctx,
@@ -151,31 +157,58 @@ type Committed struct {
 // call, so chuck is never behind its own database. A change whose item has
 // moved returns ErrStale and writes nothing.
 func (s *Store) Commit(ctx context.Context, at time.Time, changes ...Change) ([]Committed, error) {
-	out := make([]Committed, 0, len(changes))
+	var out []Committed
 	err := s.inTx(ctx, func(tx *sql.Tx) error {
-		for i, c := range changes {
-			itemID, from, err := applyChange(ctx, tx, at, c)
-			if err != nil {
-				return fmt.Errorf("change %d: %w", i, err)
-			}
-			effects := c.Effects
-			if effects == "" {
-				effects = "[]"
-			}
-			var tid int64
-			if err := tx.QueryRowContext(ctx, `INSERT INTO transitions
-				(item_id, from_state, to_state, input_kind, input_ref, reason, actor, config_sha, effects_json, created_at)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
-				itemID, from, c.To, c.InputKind, c.InputRef, c.Reason, c.Actor, c.ConfigSHA, effects, ts(at),
-			).Scan(&tid); err != nil {
-				return fmt.Errorf("change %d: transition: %w", i, err)
-			}
-			out = append(out, Committed{ItemID: itemID, TransitionID: tid})
-		}
-		return nil
+		var err error
+		out, err = commitTx(ctx, tx, at, changes)
+		return err
 	})
 	if err != nil {
 		return nil, err
+	}
+	return out, nil
+}
+
+// CommitVerdict ends a run and applies the changes its verdict caused in
+// one transaction. A verdict counts only for the run that is open, so if
+// the run has already ended (a second post, a late one) it returns
+// ErrStale and writes nothing: the duplicate cannot move the item.
+func (s *Store) CommitVerdict(ctx context.Context, at time.Time, runID int64, end RunEnd, changes ...Change) ([]Committed, error) {
+	var out []Committed
+	err := s.inTx(ctx, func(tx *sql.Tx) error {
+		if err := endRun(ctx, tx, runID, end, at); err != nil {
+			return err
+		}
+		var err error
+		out, err = commitTx(ctx, tx, at, changes)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func commitTx(ctx context.Context, tx *sql.Tx, at time.Time, changes []Change) ([]Committed, error) {
+	out := make([]Committed, 0, len(changes))
+	for i, c := range changes {
+		itemID, from, err := applyChange(ctx, tx, at, c)
+		if err != nil {
+			return nil, fmt.Errorf("change %d: %w", i, err)
+		}
+		effects := c.Effects
+		if effects == "" {
+			effects = "[]"
+		}
+		var tid int64
+		if err := tx.QueryRowContext(ctx, `INSERT INTO transitions
+			(item_id, from_state, to_state, input_kind, input_ref, reason, actor, config_sha, effects_json, created_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+			itemID, from, c.To, c.InputKind, c.InputRef, c.Reason, c.Actor, c.ConfigSHA, effects, ts(at),
+		).Scan(&tid); err != nil {
+			return nil, fmt.Errorf("change %d: transition: %w", i, err)
+		}
+		out = append(out, Committed{ItemID: itemID, TransitionID: tid})
 	}
 	return out, nil
 }
@@ -305,30 +338,55 @@ type Transition struct {
 	CreatedAt time.Time
 }
 
+const transitionCols = `id, item_id, from_state, to_state, input_kind, input_ref,
+	reason, actor, config_sha, effects_json, created_at`
+
+func scanTransition(row interface{ Scan(...any) error }) (Transition, error) {
+	var t Transition
+	var from sql.NullString
+	var at string
+	if err := row.Scan(&t.ID, &t.ItemID, &from, &t.To, &t.InputKind, &t.InputRef,
+		&t.Reason, &t.Actor, &t.ConfigSHA, &t.Effects, &at); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return t, ErrNotFound
+		}
+		return t, err
+	}
+	t.From = from.String
+	var err error
+	t.CreatedAt, err = parseTS(at)
+	return t, err
+}
+
 // Transitions returns an item's history, oldest first.
 func (s *Store) Transitions(ctx context.Context, itemID int64) ([]Transition, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, item_id, from_state, to_state, input_kind, input_ref,
-		reason, actor, config_sha, effects_json, created_at FROM transitions WHERE item_id = ? ORDER BY id`, itemID)
+	rows, err := s.db.QueryContext(ctx, `SELECT `+transitionCols+` FROM transitions WHERE item_id = ? ORDER BY id`, itemID)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = rows.Close() }()
 	var out []Transition
 	for rows.Next() {
-		var t Transition
-		var from sql.NullString
-		var at string
-		if err := rows.Scan(&t.ID, &t.ItemID, &from, &t.To, &t.InputKind, &t.InputRef,
-			&t.Reason, &t.Actor, &t.ConfigSHA, &t.Effects, &at); err != nil {
-			return nil, err
-		}
-		t.From = from.String
-		if t.CreatedAt, err = parseTS(at); err != nil {
+		t, err := scanTransition(rows)
+		if err != nil {
 			return nil, err
 		}
 		out = append(out, t)
 	}
 	return out, rows.Err()
+}
+
+// TransitionByID returns one transition.
+func (s *Store) TransitionByID(ctx context.Context, id int64) (Transition, error) {
+	return scanTransition(s.db.QueryRowContext(ctx, `SELECT `+transitionCols+` FROM transitions WHERE id = ?`, id))
+}
+
+// LatestTransition returns an item's most recent transition. Its effects
+// are the only ones the tick retries: an older row's unfinished effects
+// were for a state the item has since left.
+func (s *Store) LatestTransition(ctx context.Context, itemID int64) (Transition, error) {
+	return scanTransition(s.db.QueryRowContext(ctx,
+		`SELECT `+transitionCols+` FROM transitions WHERE item_id = ? ORDER BY id DESC LIMIT 1`, itemID))
 }
 
 // oneRow turns an Exec that should touch exactly one row into ErrNotFound

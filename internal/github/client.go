@@ -75,13 +75,18 @@ func (c *Client) RemoveLabel(ctx context.Context, number int, label string) erro
 // Comment posts a comment ending in the hidden loop-verdict marker. The
 // marker names what posted it, such as "run=12 stage=review".
 func (c *Client) Comment(ctx context.Context, number int, body, marker string) (string, error) {
-	marker = strings.ReplaceAll(marker, "--", "")
 	var out struct {
 		HTMLURL string `json:"html_url"`
 	}
 	err := c.call(ctx, http.MethodPost, c.repoPath("/issues/%d/comments", number),
-		map[string]string{"body": strings.TrimRight(body, "\n") + "\n\n" + verdictMarker + marker + " -->"}, &out)
+		map[string]string{"body": strings.TrimRight(body, "\n") + "\n\n" + MarkerText(marker)}, &out)
 	return out.HTMLURL, err
+}
+
+// MarkerText is the hidden marker Comment appends for marker, so a caller
+// can tell whether a comment it may have posted is already there.
+func MarkerText(marker string) string {
+	return verdictMarker + strings.ReplaceAll(marker, "--", "") + " -->"
 }
 
 // SetStatus sets the chuck/loop commit status on sha.
@@ -141,9 +146,12 @@ type File struct {
 	Status       string `json:"status"`
 }
 
+// ErrTooManyFiles is a PR whose file list GitHub truncates at 3000.
+var ErrTooManyFiles = errors.New("PR changes 3000 files or more; GitHub lists no more")
+
 // PRFiles lists every file a PR changes, following pages. GitHub stops at
-// 3000 files; a PR that reaches that is reported as an error rather than
-// judged on a partial list.
+// 3000 files; a PR that reaches that is reported as ErrTooManyFiles rather
+// than judged on a partial list.
 func (c *Client) PRFiles(ctx context.Context, number int) ([]File, error) {
 	var all []File
 	for page := 1; ; page++ {
@@ -156,7 +164,7 @@ func (c *Client) PRFiles(ctx context.Context, number int) ([]File, error) {
 			return all, nil
 		}
 		if len(all) >= 3000 {
-			return nil, fmt.Errorf("PR #%d changes 3000 files or more; GitHub lists no more", number)
+			return nil, fmt.Errorf("PR #%d: %w", number, ErrTooManyFiles)
 		}
 	}
 }

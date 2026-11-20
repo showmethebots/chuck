@@ -1,7 +1,9 @@
 // Command chuck runs the agent delivery loop. The design is
-// docs/superpowers/specs/2026-11-03-delivery-loop-design.md; until the loop
-// packages land, chuck serves /healthz and stores signed GitHub deliveries
-// without acting on them.
+// docs/superpowers/specs/2026-11-03-delivery-loop-design.md. chuck serves
+// /healthz and stores signed GitHub deliveries; the loop itself (the
+// executor and the tick in internal/engine) turns on only when every
+// ${VAR} config/chuck.yaml names is set. Until then deliveries are stored
+// as handled and nothing acts on them.
 //
 //	chuck run       start the server (default)
 //	chuck validate [loop.json ...]  check config/chuck.yaml and any loop.json files given, then exit
@@ -30,12 +32,14 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"syscall"
 	"time"
 
 	"github.com/joho/godotenv"
 
 	"github.com/showmethebots/chuck/internal/config"
+	"github.com/showmethebots/chuck/internal/engine"
 	"github.com/showmethebots/chuck/internal/github"
 	"github.com/showmethebots/chuck/internal/memory"
 	"github.com/showmethebots/chuck/internal/web"
@@ -139,7 +143,8 @@ func runServer(ctx context.Context, log *slog.Logger, getenv func(string) string
 	// Structure only: the secrets chuck.yaml names are resolved when the
 	// loop starts using them, so a deploy before they are set still serves
 	// /healthz and the webhook.
-	if _, err := checkConfigDir(configDir); err != nil {
+	chuckCfg, err := checkConfigDir(configDir)
+	if err != nil {
 		return fmt.Errorf("config: %w", err)
 	}
 	interval, err := time.ParseDuration(envOr(getenv, "CHUCK_HEARTBEAT", "1m"))
@@ -171,8 +176,19 @@ func runServer(ctx context.Context, log *slog.Logger, getenv func(string) string
 		Log: log, Interval: interval, Version: version, BootCount: boots,
 		Integrations: integrations(secret),
 	}
+	eng, err := newEngine(chuckCfg, getenv, store, log)
+	if err != nil {
+		return err
+	}
+	if eng != nil {
+		srv.Background = append(srv.Background, eng.Run)
+		srv.Integrations = append(srv.Integrations, "loop")
+	}
 	if secret != "" {
 		rcv := &github.Receiver{Secret: []byte(secret), Store: store, Log: log}
+		if eng != nil {
+			rcv.Notify = eng.Notify
+		}
 		if getenv("CHUCK_WEBHOOK_ALLOW_ANY_IP") == "1" {
 			rcv.AllowAnyIP = true
 			log.Warn("CHUCK_WEBHOOK_ALLOW_ANY_IP=1: webhooks are accepted from ANY IP address, not only GitHub's. " +
@@ -184,6 +200,40 @@ func runServer(ctx context.Context, log *slog.Logger, getenv func(string) string
 		srv.Webhook = rcv
 	}
 	return srv.Run(ctx, ln)
+}
+
+// newEngine builds the loop from config/chuck.yaml once every reference in
+// it resolves, OAuth ones included, so the loop never runs half
+// configured. With any unset or malformed it returns nil and logs which
+// (never a value): /healthz and the webhook keep serving either way.
+func newEngine(c *config.Chuck, getenv func(string) string, store *memory.Store, log *slog.Logger) (*engine.Engine, error) {
+	r, err := c.Resolve(getenv)
+	if err != nil {
+		log.Warn("loop off: config/chuck.yaml is not fully resolved", "why", err.Error())
+		return nil, nil
+	}
+	src := &engine.AppSource{ByOwner: map[string]*github.App{}}
+	for _, a := range r.Apps {
+		id, err := strconv.ParseInt(a.AppID, 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("app %s: app_id: %w", a.Owner, err)
+		}
+		key, err := github.ParsePrivateKey([]byte(a.PrivateKey))
+		if err != nil {
+			return nil, fmt.Errorf("app %s: %w", a.Owner, err)
+		}
+		src.ByOwner[a.Owner] = &github.App{ID: id, Key: key}
+		src.Order = append(src.Order, a.Owner)
+	}
+	humans := make([]int64, 0, len(r.Humans))
+	for _, h := range r.Humans {
+		humans = append(humans, h.ID)
+	}
+	log.Info("loop on", "apps", src.Order, "tick", r.Tick.Std().String())
+	return &engine.Engine{
+		Store: store, GitHub: src, Humans: humans, Log: log,
+		Tick: r.Tick.Std(), Retention: r.WebhookRetention.Std(),
+	}, nil
 }
 
 // integrations names what the environment switched on, for logs and
