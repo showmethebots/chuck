@@ -436,8 +436,13 @@ func TestWIPReleaseStartsOldestReady(t *testing.T) {
 		moves: []string{"pr#13:done", "issue#12:done", "issue#20:building"}, effects: []string{"open_ratchet_issue", "launch:build"}}
 	r.run(t)
 	// Approving with a free slot and nothing older waiting starts at once.
-	row{name: "approve into a free slot", item: issue(12, StateAwaitingApproval), in: dash(ActionApprove, nil),
+	res := row{name: "approve into a free slot", item: issue(12, StateAwaitingApproval), in: dash(ActionApprove, nil),
 		moves: []string{"issue#12:building"}, effects: []string{"launch:build"}}.run(t)
+	// The change carries the state the store still has, so the commit's
+	// state check holds.
+	if from := res.Changes[0].Item.State; from != StateAwaitingApproval {
+		t.Errorf("change from %s; want awaiting-approval", from)
+	}
 	// With an older ready item, the older one goes first.
 	row{name: "approve behind an older ready item", item: issue(12, StateAwaitingApproval),
 		in:    withFacts(dash(ActionApprove, nil), Facts{Ready: []Item{*issue(9, StateReady)}}),
@@ -658,4 +663,52 @@ func readFile(t *testing.T, path string) string {
 		t.Fatal(err)
 	}
 	return string(b)
+}
+
+func TestLateMergeWebhookAfterReplayDoesNothing(t *testing.T) {
+	for _, s := range []State{StateMerged, StateValidating, StateAwaitingProdApproval, StatePromoting} {
+		res := Transition(pr(13, 12, s), repo, loopCfg(),
+			webhook("pull_request", "closed", func(w *WebhookInput) { w.Merged = true }), now)
+		if len(res.Changes) != 0 || !strings.Contains(res.Reason, "already merged") {
+			t.Errorf("%s: changes %v, reason %q; want none, already merged", s, moves(res), res.Reason)
+		}
+	}
+}
+
+func TestTooManyFilesIsARiskPath(t *testing.T) {
+	p := openPR()
+	p.ChangedFiles, p.TooManyFiles = nil, true
+	res := Transition(pr(13, 12, StateSweep), repo, loopCfg(),
+		withFacts(verdict(config.StageSweep, sweepReady()), Facts{ActiveCount: 1, PR: p, ReviewedSHA: head}), now)
+	if got := moves(res); !slices.Equal(got, []string{"pr#13:awaiting-merge"}) {
+		t.Fatalf("moves %v; want awaiting-merge", got)
+	}
+	if got := kinds(res); !slices.Equal(got, []string{"set_status:pending"}) {
+		t.Errorf("effects %v; want a pending hold", got)
+	}
+	if !strings.Contains(res.Reason, "3000") {
+		t.Errorf("reason %q; want it to name the file limit", res.Reason)
+	}
+}
+
+func TestEscalate(t *testing.T) {
+	res := Escalate(*pr(13, 12, StateMerging), loopCfg(), "merge failed three ticks running")
+	if got := moves(res); !slices.Equal(got, []string{"pr#13:needs-human"}) {
+		t.Fatalf("moves %v", got)
+	}
+	if res.Changes[0].EscalatedFrom != StateMerging {
+		t.Errorf("escalated_from %q; want merging", res.Changes[0].EscalatedFrom)
+	}
+	var mention bool
+	for _, e := range res.Effects {
+		mention = mention || e.Kind == EffectMention
+	}
+	if !mention {
+		t.Error("no mention for the escalation")
+	}
+	for _, s := range []State{StateNeedsHuman, StateDone, StateClosed} {
+		if res := Escalate(*pr(13, 12, s), loopCfg(), "x"); len(res.Changes) != 0 {
+			t.Errorf("%s escalated: %v", s, moves(res))
+		}
+	}
 }

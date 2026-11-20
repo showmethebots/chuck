@@ -157,6 +157,10 @@ type RunEnd struct {
 // closed, or for a Callback, if it is not running, so a second verdict post
 // changes nothing.
 func (s *Store) EndRun(ctx context.Context, runID int64, e RunEnd, at time.Time) error {
+	return s.inTx(ctx, func(tx *sql.Tx) error { return endRun(ctx, tx, runID, e, at) })
+}
+
+func endRun(ctx context.Context, tx *sql.Tx, runID int64, e RunEnd, at time.Time) error {
 	switch e.Status {
 	case RunFinished, RunFailed, RunCancelled, RunTimedOut:
 	default:
@@ -171,7 +175,7 @@ func (s *Store) EndRun(ctx context.Context, runID int64, e RunEnd, at time.Time)
 	if e.ExitCode != nil {
 		exit = *e.ExitCode
 	}
-	res, err := s.db.ExecContext(ctx, `UPDATE runs SET status = ?, reason = ?, exit_code = ?,
+	res, err := tx.ExecContext(ctx, `UPDATE runs SET status = ?, reason = ?, exit_code = ?,
 		duration_ms = ?, verdict_json = ?, log_tail = ?, callback_at = COALESCE(?, callback_at)
 		WHERE id = ? AND `+open,
 		e.Status, e.Reason, exit, e.DurationMS, nullStr(e.VerdictJSON), e.LogTail, callback, runID)
@@ -266,6 +270,27 @@ func (s *Store) RunByID(ctx context.Context, id int64) (Run, error) {
 func (s *Store) RunByToken(ctx context.Context, token string) (Run, error) {
 	return scanRun(s.db.QueryRowContext(ctx,
 		`SELECT `+runCols+` FROM runs WHERE token_hash = ?`, HashToken(token)))
+}
+
+// OpenRun returns the item's launching or running run, or ErrNotFound.
+// There is at most one (runs_one_open).
+func (s *Store) OpenRun(ctx context.Context, itemID int64) (Run, error) {
+	return scanRun(s.db.QueryRowContext(ctx, `SELECT `+runCols+` FROM runs
+		WHERE item_id = ? AND status IN ('launching', 'running')`, itemID))
+}
+
+// LatestVerdict returns the verdict JSON of the item's most recent
+// finished run at a stage, or ErrNotFound. The loop reads the reviewed
+// head from the last review this way.
+func (s *Store) LatestVerdict(ctx context.Context, itemID int64, stage string) (string, error) {
+	var v string
+	err := s.db.QueryRowContext(ctx, `SELECT verdict_json FROM runs
+		WHERE item_id = ? AND stage = ? AND status = 'finished' AND verdict_json IS NOT NULL
+		ORDER BY id DESC LIMIT 1`, itemID, stage).Scan(&v)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	return v, err
 }
 
 // OpenRuns returns every launching or running run, oldest first. The

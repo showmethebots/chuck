@@ -234,6 +234,10 @@ type PRFacts struct {
 	ChecksFailed  bool
 	ChangedFiles  []string
 	PreviousNames []string // renamed files' old paths: a rename out of a risk path is a risk-path change
+	// TooManyFiles means GitHub would not list every changed file (it
+	// stops at 3000). The list is then partial, so the PR is treated as
+	// touching a risk path: a human approves it.
+	TooManyFiles bool
 	// LoopStatus is the chuck/loop status on the head: "" when there is
 	// none. Only chuck sets it, so at awaiting-merge "pending" means the
 	// sweep held the PR for risk paths, and "failure" that it left

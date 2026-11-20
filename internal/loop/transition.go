@@ -141,9 +141,10 @@ func (t *txn) startNext() {
 	}
 	for _, c := range t.res.Changes {
 		if c.To == StateReady {
-			it := c.Item
-			it.State = StateReady
-			queue = append(queue, it)
+			// The item as it was before this result: its change to ready
+			// is replaced below, and a Change carries the state the store
+			// still has.
+			queue = append(queue, c.Item)
 		}
 	}
 	for _, r := range queue {
@@ -317,6 +318,14 @@ func (t *txn) prClosed(item *Item, w WebhookInput) {
 	}
 	if item.State == StateMerging || item.State == StateAwaitingMerge {
 		t.move(*item, StateMerged, "merged", false)
+		return
+	}
+	// The tick replays a merge it finds on GitHub when the webhook never
+	// came. If the webhook was only late, it arrives after the replay and
+	// must not read as a second merge from outside the loop.
+	switch item.State {
+	case StateMerged, StateValidating, StateAwaitingProdApproval, StatePromoting:
+		t.skip("PR already merged (%s)", item.State)
 		return
 	}
 	t.move(*item, StateNeedsHuman, "merged outside the loop", false)
@@ -610,9 +619,16 @@ func (t *txn) reviewAgain(reason string) {
 	t.move(it, StateReview, reason, true)
 }
 
+// tooManyFiles is the risk "path" a PR whose file list GitHub truncated
+// reports: chuck cannot see what it changes, so it fails closed.
+const tooManyFiles = "(3000 or more files; GitHub lists no more)"
+
 func (t *txn) riskPaths() []string {
 	if t.f.PR == nil {
 		return nil
+	}
+	if t.f.PR.TooManyFiles {
+		return []string{tooManyFiles}
 	}
 	files := append(append([]string(nil), t.f.PR.ChangedFiles...), t.f.PR.PreviousNames...)
 	return t.cfg.RiskPathsHit(files)
@@ -779,6 +795,28 @@ func (t *txn) tick() {
 	}
 	t.skip("nothing to do")
 }
+
+// --- escalation outside the table ---
+
+// Escalate moves an item to needs-human for a reason the executor found
+// rather than an input: an effect that kept failing, or facts chuck could
+// not read for several ticks. It returns no change for an item already in
+// needs-human or a terminal state, so a failure there cannot loop.
+func Escalate(item Item, cfg *config.Loop, reason string) Result {
+	if item.State == StateNeedsHuman || item.State.Terminal() {
+		return noop(fmt.Sprintf("not escalated: already %s", item.State))
+	}
+	t := &txn{cfg: cfg, item: item}
+	t.move(item, StateNeedsHuman, reason, false)
+	return t.res
+}
+
+// BuildBranch is the branch chuck names for an issue's build: the PR the
+// build reports must be on it.
+func BuildBranch(issue int) string { return fmt.Sprintf("loop/issue-%d", issue) }
+
+// StateLabel is the loop:* label that mirrors a state on GitHub.
+func StateLabel(s State) string { return "loop:" + string(s) }
 
 // --- helpers ---
 

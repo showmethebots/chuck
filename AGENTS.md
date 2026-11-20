@@ -47,6 +47,14 @@ true, not before.
   them. The hold exists because
   a consumer repo's `CODEOWNERS` covers only `.claude/**` and `.github/**`
   and worker tokens can call the merge API.
+- **State is committed before effects.** `internal/engine` writes every
+  change and its transition row in one transaction before any GitHub
+  call, with the effects on the row as pending, then runs them in order
+  and records each result there, stopping at the first failure. A failed
+  effect never rolls the state back; the tick retries the item's newest
+  row, abandons an effect after three failing ticks and escalates the
+  item. So every effect must be safe to run twice: a merge re-reads the
+  PR and is never retried once the head has moved from the swept sha.
 - **`loop.Transition` does no I/O.** It decides from the item, the repo,
   the config, the input and the `Facts` the caller gathered, and returns
   changes and effects. The package imports no network, database or

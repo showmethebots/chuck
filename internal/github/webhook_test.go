@@ -119,9 +119,28 @@ func TestWebhookStoresSignedDelivery(t *testing.T) {
 	if !e.ReceivedAt.Equal(fixedNow) {
 		t.Errorf("ReceivedAt = %v", e.ReceivedAt)
 	}
-	// Until the loop reads deliveries, none may be left for it to replay.
+	// With the loop off, none may be left for it to replay once it is on.
 	if !e.HandledAt.Equal(fixedNow) || e.Result != ResultNoLoop {
 		t.Errorf("handled = %v %q, want stored as handled", e.HandledAt, e.Result)
+	}
+}
+
+func TestWebhookLeavesDeliveryForTheLoop(t *testing.T) {
+	store := &fakeStore{}
+	h := newHook(store, "s3cret")
+	notified := 0
+	h.Notify = func() { notified++ }
+	body := fixture(t, "issues_opened.json")
+	for range 2 { // the second is a redelivery
+		if w := deliver(h, "issues", "d-1", sign([]byte("s3cret"), body), body); w.Code != http.StatusAccepted {
+			t.Fatalf("status = %d", w.Code)
+		}
+	}
+	if len(store.events) != 1 || !store.events[0].HandledAt.IsZero() || store.events[0].Result != "" {
+		t.Fatalf("stored %+v; want one unhandled delivery", store.events)
+	}
+	if notified != 1 {
+		t.Errorf("notified %d times; want once, for the new delivery only", notified)
 	}
 }
 
