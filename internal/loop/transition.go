@@ -361,6 +361,14 @@ func (t *txn) workflowRun(item *Item, w WebhookInput) {
 		t.skip("workflow run from %s, not a push or dispatch in this repository", w.RunEvent)
 		return
 	}
+	// chuck dispatches deploy-prod after committing promoting, so its run
+	// is newer than the state. An older dispatch, a human's manual run for
+	// the same sha, did not come from this promotion. The minute allows
+	// for skew between chuck's clock and GitHub's.
+	if w.RunEvent == "workflow_dispatch" && w.RunCreated.Before(item.StateSince.Add(-RunClockSkew)) {
+		t.skip("dispatched run from %s, before %s", w.RunCreated.UTC().Format(time.RFC3339), item.State)
+		return
+	}
 	ok := w.Conclusion == "success"
 	switch {
 	case w.Workflow == t.cfg.Deploy.DevWorkflow && item.State == StateMerged:
@@ -385,6 +393,10 @@ func (t *txn) workflowRun(item *Item, w WebhookInput) {
 		t.skip("workflow %s in %s", w.Workflow, item.State)
 	}
 }
+
+// RunClockSkew is how far GitHub's clock may run behind chuck's when a
+// run's creation time is compared with a state's.
+const RunClockSkew = time.Minute
 
 func mergeSHA(pr *PRFacts) string {
 	if pr == nil {

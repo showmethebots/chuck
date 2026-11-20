@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 )
 
 // maxPages bounds every paginated read at 5000 entries, so a runaway list
@@ -88,10 +89,11 @@ func (c *Client) SubIssues(ctx context.Context, number int) ([]int, error) {
 
 // IssueEvent is one entry of an issue's or PR's timeline of events.
 type IssueEvent struct {
-	ID    int64  `json:"id"`
-	Event string `json:"event"` // labeled, unlabeled, ...
-	Actor User   `json:"actor"`
-	Label struct {
+	ID        int64     `json:"id"`
+	Event     string    `json:"event"` // labeled, unlabeled, ...
+	Actor     User      `json:"actor"`
+	CreatedAt time.Time `json:"created_at"`
+	Label     struct {
 		Name string `json:"name"`
 	} `json:"label"`
 }
@@ -125,14 +127,19 @@ func (c *Client) Reviews(ctx context.Context, number int) ([]Review, error) {
 // WorkflowRun is one Actions run, with what the loop checks about where it
 // came from.
 type WorkflowRun struct {
-	ID             int64  `json:"id"`
-	Name           string `json:"name"`
-	Path           string `json:"path"` // .github/workflows/deploy-dev.yml
-	HeadSHA        string `json:"head_sha"`
-	HeadBranch     string `json:"head_branch"`
-	Event          string `json:"event"`
-	Status         string `json:"status"`
-	Conclusion     string `json:"conclusion"`
+	ID         int64  `json:"id"`
+	Name       string `json:"name"`
+	Path       string `json:"path"` // .github/workflows/deploy-dev.yml
+	HeadSHA    string `json:"head_sha"`
+	HeadBranch string `json:"head_branch"`
+	Event      string `json:"event"`
+	Status     string `json:"status"`
+	Conclusion string `json:"conclusion"`
+	// DisplayTitle is the run's run-name. A dispatched run's head_sha is
+	// the branch tip when it was dispatched, not the sha it deploys, so
+	// the deploy workflow names that sha in its run-name.
+	DisplayTitle   string    `json:"display_title"`
+	CreatedAt      time.Time `json:"created_at"`
 	HeadRepository struct {
 		ID int64 `json:"id"`
 	} `json:"head_repository"`
@@ -148,6 +155,21 @@ func (c *Client) WorkflowRuns(ctx context.Context, headSHA string) ([]WorkflowRu
 			WorkflowRuns []WorkflowRun `json:"workflow_runs"`
 		}
 		err := c.call(ctx, http.MethodGet, c.repoPath("/actions/runs?head_sha=%s&per_page=100&page=%d", url.QueryEscape(headSHA), page), nil, &out)
+		return out.WorkflowRuns, err
+	})
+}
+
+// DispatchRuns lists a workflow's workflow_dispatch runs created at or
+// after since, newest first. workflow is the file name, as a dispatch
+// names it.
+func (c *Client) DispatchRuns(ctx context.Context, workflow string, since time.Time) ([]WorkflowRun, error) {
+	created := url.QueryEscape(">=" + since.UTC().Format(time.RFC3339))
+	return pages(func(page int) ([]WorkflowRun, error) {
+		var out struct {
+			WorkflowRuns []WorkflowRun `json:"workflow_runs"`
+		}
+		err := c.call(ctx, http.MethodGet, c.repoPath("/actions/workflows/%s/runs?event=workflow_dispatch&created=%s&per_page=100&page=%d",
+			url.PathEscape(workflow), created, page), nil, &out)
 		return out.WorkflowRuns, err
 	})
 }

@@ -257,13 +257,34 @@ func kindName(k string) string {
 // lastLabeler is who most recently added label, from an item's events.
 // Zero (no one) counts as a non-human.
 func lastLabeler(events []github.IssueEvent, label string) int64 {
-	var id int64
+	ev, _ := lastLabeled(events, label)
+	return ev.Actor.ID
+}
+
+func lastLabeled(events []github.IssueEvent, label string) (github.IssueEvent, bool) {
+	var last github.IssueEvent
+	found := false
 	for _, ev := range events {
 		if ev.Event == "labeled" && ev.Label.Name == label {
-			id = ev.Actor.ID
+			last, found = ev, true
 		}
 	}
-	return id
+	return last, found
+}
+
+// approvalLabeler is who added an approval label to an item, but only if
+// they added it after the item reached its state. A label left from an
+// earlier visit to the state approved an earlier head or an earlier
+// promotion, not this one, so replaying it would approve what no human
+// saw. The comparison is strict and has no allowance for clock skew: the
+// tick is the fallback for a missed delivery, and a person can add the
+// label again.
+func approvalLabeler(events []github.IssueEvent, label string, it memory.Item) (int64, bool) {
+	ev, ok := lastLabeled(events, label)
+	if !ok || !ev.CreatedAt.After(it.StateSince) {
+		return 0, false
+	}
+	return ev.Actor.ID, true
 }
 
 func hasLabel(is github.Issue, label string) bool {
@@ -336,8 +357,12 @@ func (e *Engine) reconcileItem(ctx context.Context, rc *repoCtx, it memory.Item)
 		if err != nil {
 			return err
 		}
+		sender, ok := approvalLabeler(events, loop.LabelReady, it)
+		if !ok {
+			return nil
+		}
 		return e.replay(ctx, rc, &it, loop.WebhookInput{Event: "issues", Action: "labeled", Label: loop.LabelReady,
-			Number: it.Number, SenderID: lastLabeler(events, loop.LabelReady)})
+			Number: it.Number, SenderID: sender})
 	}
 
 	pr, err := rc.api.PullRequest(ctx, it.Number)
@@ -375,10 +400,15 @@ func (e *Engine) reconcileItem(ctx context.Context, rc *repoCtx, it memory.Item)
 			if err != nil {
 				return err
 			}
-			if err := e.replay(ctx, rc, &it, loop.WebhookInput{Event: "pull_request", Action: "labeled",
-				Label: loop.LabelApproveMerge, Number: it.Number, SHA: pr.Head.SHA,
-				SenderID: lastLabeler(events, loop.LabelApproveMerge)}); err != nil {
-				return err
+			// The label names no sha, so it stands for the head only if it
+			// came after the item reached awaiting-merge, which is after
+			// the reviewed head was pushed. The table still requires the
+			// head to be the reviewed sha.
+			if sender, ok := approvalLabeler(events, loop.LabelApproveMerge, it); ok {
+				if err := e.replay(ctx, rc, &it, loop.WebhookInput{Event: "pull_request", Action: "labeled",
+					Label: loop.LabelApproveMerge, Number: it.Number, SHA: pr.Head.SHA, SenderID: sender}); err != nil {
+					return err
+				}
 			}
 		}
 		reviews, err := rc.api.Reviews(ctx, it.Number)
@@ -402,9 +432,12 @@ func (e *Engine) reconcileItem(ctx context.Context, rc *repoCtx, it memory.Item)
 		if err != nil {
 			return err
 		}
+		sender, ok := approvalLabeler(events, loop.LabelApproveProd, it)
+		if !ok {
+			return nil
+		}
 		return e.replay(ctx, rc, &it, loop.WebhookInput{Event: "pull_request", Action: "labeled",
-			Label: loop.LabelApproveProd, Number: it.Number, SHA: pr.Head.SHA,
-			SenderID: lastLabeler(events, loop.LabelApproveProd)})
+			Label: loop.LabelApproveProd, Number: it.Number, SHA: pr.Head.SHA, SenderID: sender})
 	case loop.StateMerged, loop.StatePromoting:
 		if !pr.Merged || pr.MergeSHA == "" {
 			return nil
@@ -417,6 +450,17 @@ func (e *Engine) reconcileItem(ctx context.Context, rc *repoCtx, it memory.Item)
 		if err != nil {
 			return err
 		}
+		if state == loop.StatePromoting {
+			// A push run's head is the merge. The run chuck dispatched has
+			// the branch tip as its head, whatever landed after the merge,
+			// so it is listed by workflow, from when promoting began. chuck
+			// dispatches the workflow by this name, so the API knows it.
+			dispatched, err := rc.api.DispatchRuns(ctx, want, it.StateSince.Add(-loop.RunClockSkew))
+			if err != nil {
+				return err
+			}
+			runs = append(runs, dispatched...)
+		}
 		var latest *loop.WebhookInput
 		var latestID int64
 		for _, r := range runs {
@@ -427,7 +471,7 @@ func (e *Engine) reconcileItem(ctx context.Context, rc *repoCtx, it memory.Item)
 			fillRun(&w, r, r.Repository.ID, rc.cfg.Deploy.DevWorkflow, rc.cfg.Deploy.ProdWorkflow)
 			// A run is only this repo's own if its head repository is; the
 			// list is already the repo's, so its id is the reference.
-			if w.Workflow == want && r.ID > latestID {
+			if w.Workflow == want && w.SHA == pr.MergeSHA && r.ID > latestID {
 				latest, latestID = &w, r.ID
 			}
 		}

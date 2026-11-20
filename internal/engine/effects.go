@@ -154,8 +154,10 @@ func (e *Engine) run(ctx context.Context, rc *repoCtx, ef loop.Effect, transitio
 }
 
 // syncLabel makes the item carry its state's loop:* label and no other
-// state's. Trigger labels that are not states (loop:approve-merge,
-// loop:approve-prod) are left alone.
+// state's. An approval label (loop:approve-merge, loop:approve-prod) stays
+// only in the state it approves: once the item leaves that state the
+// approval is spent or its head is gone, and a label left behind would
+// read as approval of whatever comes next.
 func syncLabel(ctx context.Context, api RepoAPI, number int, state loop.State) error {
 	is, err := api.GetIssue(ctx, number)
 	if err != nil {
@@ -168,7 +170,7 @@ func syncLabel(ctx context.Context, api RepoAPI, number int, state loop.State) e
 			have = true
 			continue
 		}
-		if isStateLabel(l.Name) {
+		if isStateLabel(l.Name) || staleApproval(l.Name, state) {
 			if err := api.RemoveLabel(ctx, number, l.Name); err != nil {
 				return err
 			}
@@ -178,6 +180,16 @@ func syncLabel(ctx context.Context, api RepoAPI, number int, state loop.State) e
 		return api.AddLabel(ctx, number, want)
 	}
 	return nil
+}
+
+func staleApproval(name string, state loop.State) bool {
+	switch name {
+	case loop.LabelApproveMerge:
+		return state != loop.StateAwaitingMerge
+	case loop.LabelApproveProd:
+		return state != loop.StateAwaitingProdApproval
+	}
+	return false
 }
 
 func isStateLabel(name string) bool {

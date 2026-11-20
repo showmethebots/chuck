@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/showmethebots/chuck/internal/github"
 	"github.com/showmethebots/chuck/internal/memory"
@@ -24,6 +25,7 @@ type RepoAPI interface {
 	CheckRuns(ctx context.Context, sha string) ([]github.CheckRun, error)
 	Statuses(ctx context.Context, sha string) ([]github.Status, error)
 	WorkflowRuns(ctx context.Context, headSHA string) ([]github.WorkflowRun, error)
+	DispatchRuns(ctx context.Context, workflow string, since time.Time) ([]github.WorkflowRun, error)
 	ReadFile(ctx context.Context, path, ref string) (github.Blob, error)
 	UserByID(ctx context.Context, id int64) (github.User, error)
 

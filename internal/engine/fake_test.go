@@ -51,16 +51,20 @@ type fakeIssue struct {
 // fakeGitHub is one repository and one App, in memory. fail makes a
 // method return an error until cleared; calls counts every method.
 type fakeGitHub struct {
-	mu        sync.Mutex
-	loopJSON  string // "" means no loop.json
-	loopSHA   string
-	issues    map[int]*fakeIssue
-	prs       map[int]*github.PR
-	files     map[int][]github.File
-	reviews   map[int][]github.Review
-	runs      map[string][]github.CheckRun
-	statuses  map[string][]github.Status
-	wfRuns    map[string][]github.WorkflowRun
+	mu       sync.Mutex
+	loopJSON string // "" means no loop.json
+	loopSHA  string
+	issues   map[int]*fakeIssue
+	prs      map[int]*github.PR
+	files    map[int][]github.File
+	reviews  map[int][]github.Review
+	runs     map[string][]github.CheckRun
+	statuses map[string][]github.Status
+	wfRuns   map[string][]github.WorkflowRun
+	// dispatchRuns are listed by workflow file, not head sha.
+	dispatchRuns []github.WorkflowRun
+	// clock dates the events labelBy records.
+	clock     func() time.Time
 	fail      map[string]error
 	calls     map[string]int
 	setStatus []string // "sha state"
@@ -116,7 +120,7 @@ func (f *fakeGitHub) labelBy(n int, label string, actor int64) {
 	is := f.issue(n)
 	is.labels = append(is.labels, label)
 	f.nextID++
-	ev := github.IssueEvent{ID: f.nextID, Event: "labeled", Actor: github.User{ID: actor}}
+	ev := github.IssueEvent{ID: f.nextID, Event: "labeled", Actor: github.User{ID: actor}, CreatedAt: f.clock()}
 	ev.Label.Name = label
 	is.events = append(is.events, ev)
 }
@@ -257,6 +261,21 @@ func (f *fakeGitHub) WorkflowRuns(_ context.Context, sha string) ([]github.Workf
 		return nil, err
 	}
 	return f.wfRuns[sha], nil
+}
+
+func (f *fakeGitHub) DispatchRuns(_ context.Context, wf string, since time.Time) ([]github.WorkflowRun, error) {
+	if err := f.enter("DispatchRuns"); err != nil {
+		return nil, err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []github.WorkflowRun
+	for _, r := range f.dispatchRuns {
+		if r.Event == "workflow_dispatch" && strings.HasSuffix(r.Path, "/"+wf) && !r.CreatedAt.Before(since) {
+			out = append(out, r)
+		}
+	}
+	return out, nil
 }
 
 func (f *fakeGitHub) ReadFile(_ context.Context, path, ref string) (github.Blob, error) {
@@ -402,6 +421,7 @@ func newFixture(t *testing.T) *fixture {
 	}
 	t.Cleanup(func() { _ = s.Close() })
 	fx := &fixture{t: t, ctx: ctx, store: s, gh: newFakeGitHub(), lnch: &fakeLauncher{}, now: t0}
+	fx.gh.clock = func() time.Time { return fx.now }
 	fx.e = &Engine{Store: s, GitHub: fx.gh, Launcher: fx.lnch, Humans: []int64{human},
 		Tick: 30 * time.Minute, Retention: 720 * time.Hour,
 		Log: slog.New(slog.NewTextHandler(logOut, nil)), Now: func() time.Time { return fx.now }}

@@ -1,5 +1,6 @@
 // Package loop is the delivery loop: the stage prompts and verdict schemas
-// workers run with, and (from #23) the transition function and executor.
+// workers run with, and (from #23) the pure transition function.
+// internal/engine runs its effects.
 //
 // See docs/superpowers/specs/2026-11-03-delivery-loop-design.md, "Prompts"
 // and "The ratchet".

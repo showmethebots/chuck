@@ -253,12 +253,15 @@ func (e *Engine) mapWebhook(ctx context.Context, rc *repoCtx, event string, p pa
 		if wi.Workflow == "" {
 			return nil, "not a deploy workflow: " + r.Path, 0, nil
 		}
-		n, err := e.prForMerge(ctx, rc, r.HeadSHA)
+		n, err := e.prForMerge(ctx, rc, wi.SHA)
 		if err != nil {
 			return nil, "", 0, err
 		}
 		if n == 0 {
-			return nil, "no loop PR merged at " + short(r.HeadSHA), 0, nil
+			if wi.SHA == "" {
+				return nil, "dispatched run names no single sha in its run-name", 0, nil
+			}
+			return nil, "no loop PR merged at " + short(wi.SHA), 0, nil
 		}
 		return &loop.Input{Kind: loop.InputWebhook, Webhook: wi}, memory.KindPR, n, nil
 	}
@@ -268,8 +271,18 @@ func (e *Engine) mapWebhook(ctx context.Context, rc *repoCtx, event string, p pa
 // fillRun maps a workflow run. The workflow is named by its file, which
 // only a merged change can add or alter on the default branch, not by its
 // display name, which any workflow can claim.
+//
+// The sha is the one the run deploys. A push run deploys its head. A
+// dispatched run's head is whatever the branch tip was when it was
+// dispatched, so it names the sha it deploys in its run-name instead
+// (`run-name: Deploy ${{ inputs.sha }}`); without exactly one full sha
+// there, the run is for no merge.
 func fillRun(wi *loop.WebhookInput, r github.WorkflowRun, repoID int64, dev, prod string) {
 	wi.SHA, wi.Branch, wi.Conclusion, wi.RunEvent = r.HeadSHA, r.HeadBranch, r.Conclusion, r.Event
+	wi.RunCreated = r.CreatedAt
+	if r.Event == "workflow_dispatch" {
+		wi.SHA = titleSHA(r.DisplayTitle)
+	}
 	wi.SameRepo = repoID > 0 && r.HeadRepository.ID == repoID && r.Repository.ID == repoID
 	if !strings.HasPrefix(r.Path, ".github/workflows/") {
 		return
@@ -283,6 +296,24 @@ func fillRun(wi *loop.WebhookInput, r github.WorkflowRun, repoID int64, dev, pro
 		}
 	}
 }
+
+// titleSHA is the one full commit sha a run-name names, or "" when it
+// names none or more than one.
+func titleSHA(title string) string {
+	found := ""
+	for _, f := range strings.FieldsFunc(title, func(r rune) bool { return !isHex(r) }) {
+		if len(f) != 40 || f == found {
+			continue
+		}
+		if found != "" {
+			return ""
+		}
+		found = f
+	}
+	return found
+}
+
+func isHex(r rune) bool { return (r >= '0' && r <= '9') || (r >= 'a' && r <= 'f') }
 
 // prForMerge finds the loop PR, waiting on a deploy, merged at sha.
 func (e *Engine) prForMerge(ctx context.Context, rc *repoCtx, sha string) (int, error) {

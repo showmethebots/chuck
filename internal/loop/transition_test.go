@@ -396,6 +396,18 @@ func TestTransitionTable(t *testing.T) {
 				w.Conclusion = "failure"
 			}), Facts{ActiveCount: 1, PR: mergedPR()}),
 			moves: []string{"pr#13:needs-human"}},
+		{name: "deploy-prod dispatched for this promotion", item: pr(13, 12, StatePromoting),
+			in: withFacts(webhook("workflow_run", "completed", func(w *WebhookInput) {
+				w.Workflow, w.Branch, w.RunEvent, w.SameRepo = "deploy-prod", "main", "workflow_dispatch", true
+				w.SHA, w.Conclusion, w.RunCreated = merge, "success", now.Add(-time.Hour+time.Second)
+			}), Facts{ActiveCount: 1, PR: mergedPR(), Linked: issue(12, StateInPR)}),
+			moves: []string{"pr#13:done", "issue#12:done"}, effects: []string{"open_ratchet_issue"}},
+		{name: "deploy-prod dispatched before the promotion", item: pr(13, 12, StatePromoting),
+			in: withFacts(webhook("workflow_run", "completed", func(w *WebhookInput) {
+				w.Workflow, w.Branch, w.RunEvent, w.SameRepo = "deploy-prod", "main", "workflow_dispatch", true
+				w.SHA, w.Conclusion, w.RunCreated = merge, "failure", now.Add(-2*time.Hour)
+			}), Facts{ActiveCount: 1, PR: mergedPR()}),
+			reason: "dispatched run from"},
 
 		{name: "tick on a stale active item", item: func() *Item { i := pr(13, 12, StateReview); i.StateSince = now.Add(-7 * time.Hour); return i }(),
 			in: withFacts(Input{Kind: InputTick}, Facts{ActiveCount: 1}), moves: []string{"pr#13:needs-human"}, reason: "stale"},

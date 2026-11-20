@@ -42,15 +42,18 @@ func TestListsFollowPagesAndRefuseRunaways(t *testing.T) {
 }
 
 func TestSubIssuesReviewsEventsRuns(t *testing.T) {
+	evAt := time.Date(2026, 11, 20, 12, 0, 0, 0, time.UTC)
 	f, c := newClient(t)
 	ctx := context.Background()
 	f.ok("GET /repos/showmethebots/demos/issues/12/sub_issues?per_page=100&page=1", `[{"number":14},{"number":15}]`)
 	f.ok("GET /repos/showmethebots/demos/pulls/13/reviews?per_page=100&page=1",
 		`[{"id":1,"user":{"id":5,"login":"h"},"state":"APPROVED","commit_id":"abc"}]`)
 	f.ok("GET /repos/showmethebots/demos/issues/12/events?per_page=100&page=1",
-		`[{"id":9,"event":"labeled","actor":{"id":5},"label":{"name":"loop:intake"}}]`)
+		`[{"id":9,"event":"labeled","actor":{"id":5},"created_at":"2026-11-20T12:00:00Z","label":{"name":"loop:intake"}}]`)
 	f.ok("GET /repos/showmethebots/demos/actions/runs?head_sha=abc&per_page=100&page=1",
 		`{"workflow_runs":[{"id":3,"path":".github/workflows/deploy-dev.yml","head_sha":"abc","event":"push","head_repository":{"id":1},"repository":{"id":1}}]}`)
+	f.ok("GET /repos/showmethebots/demos/actions/workflows/deploy-prod.yml/runs?event=workflow_dispatch&created=%3E%3D2026-11-20T12%3A00%3A00Z&per_page=100&page=1",
+		`{"workflow_runs":[{"id":4,"path":".github/workflows/deploy-prod.yml","display_title":"Deploy abc","event":"workflow_dispatch","created_at":"2026-11-20T12:01:00Z"}]}`)
 	f.ok("GET /repos/showmethebots/demos/issues?state=open&labels=loop%3Aintake&per_page=100&page=1", `[{"number":12}]`)
 	f.ok("GET /user/5", `{"id":5,"login":"h","type":"User"}`)
 
@@ -60,11 +63,14 @@ func TestSubIssuesReviewsEventsRuns(t *testing.T) {
 	if rs, err := c.Reviews(ctx, 13); err != nil || len(rs) != 1 || rs[0].State != "APPROVED" || rs[0].CommitID != "abc" || rs[0].User.ID != 5 {
 		t.Errorf("Reviews = %+v, %v", rs, err)
 	}
-	if es, err := c.IssueEvents(ctx, 12); err != nil || len(es) != 1 || es[0].Label.Name != "loop:intake" || es[0].Actor.ID != 5 {
+	if es, err := c.IssueEvents(ctx, 12); err != nil || len(es) != 1 || es[0].Label.Name != "loop:intake" || es[0].Actor.ID != 5 || !es[0].CreatedAt.Equal(evAt) {
 		t.Errorf("IssueEvents = %+v, %v", es, err)
 	}
 	if runs, err := c.WorkflowRuns(ctx, "abc"); err != nil || len(runs) != 1 || runs[0].Path != ".github/workflows/deploy-dev.yml" {
 		t.Errorf("WorkflowRuns = %+v, %v", runs, err)
+	}
+	if runs, err := c.DispatchRuns(ctx, "deploy-prod.yml", evAt); err != nil || len(runs) != 1 || runs[0].DisplayTitle != "Deploy abc" {
+		t.Errorf("DispatchRuns = %+v, %v", runs, err)
 	}
 	if is, err := c.OpenIssuesWithLabel(ctx, "loop:intake"); err != nil || len(is) != 1 {
 		t.Errorf("OpenIssuesWithLabel = %+v, %v", is, err)

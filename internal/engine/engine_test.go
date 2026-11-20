@@ -329,8 +329,9 @@ func TestTickReplaysMissedLabels(t *testing.T) {
 		t.Errorf("transition %+v", tr)
 	}
 
-	// loop:ready on an awaiting-approval issue.
+	// loop:ready on an awaiting-approval issue, added after it got there.
 	fx.seed("issue", 20, 0, "awaiting-approval")
+	fx.now = fx.now.Add(time.Minute)
 	fx.gh.labelBy(20, loop.LabelReady, human)
 	fx.tick()
 	if got := fx.state("issue", 20); got != "ready" && got != "building" {
@@ -373,6 +374,93 @@ func TestTickReplaysMissedMergeAndDeploy(t *testing.T) {
 	w := fx.deliver("pull_request", "closed", `"number":13,"pull_request":{"number":13,"merged":true,"head":{"sha":"`+head+`"}},"sender":{"id":1}`)
 	if got := fx.state("pr", 13); got != "validating" {
 		t.Errorf("late merge webhook moved the PR to %q (%s)", got, w.Result)
+	}
+}
+
+// A prod deploy chuck dispatched runs at the branch tip, which is past the
+// merge once anything else lands. The run is matched by the sha its
+// run-name names and by being newer than the promotion.
+func TestDispatchedDeployMatchedByRunName(t *testing.T) {
+	const tip = "4444444444444444444444444444444444444444"
+	run := func(id int64, title, conclusion string, created time.Time) github.WorkflowRun {
+		r := github.WorkflowRun{ID: id, Name: "Deploy prod", Path: ".github/workflows/deploy-prod.yml", HeadSHA: tip,
+			HeadBranch: "main", Event: "workflow_dispatch", Status: "completed", Conclusion: conclusion,
+			DisplayTitle: title, CreatedAt: created}
+		r.HeadRepository.ID, r.Repository.ID = repoGHID, repoGHID
+		return r
+	}
+	setup := func(t *testing.T) *fixture {
+		fx := newFixture(t)
+		fx.discover()
+		fx.seed("issue", 12, 0, "in-pr")
+		fx.seed("pr", 13, 12, "promoting")
+		p := fx.gh.openPR(13, 12)
+		p.State, p.Merged, p.MergeSHA = "closed", true, mergeSHA
+		return fx
+	}
+
+	t.Run("tick", func(t *testing.T) {
+		fx := setup(t)
+		fx.gh.dispatchRuns = []github.WorkflowRun{
+			run(1, "Deploy "+mergeSHA, "failure", t0.Add(-2*time.Hour)), // a manual run before the promotion
+			run(2, "Deploy "+newHead, "success", t0.Add(time.Minute)),   // another sha
+			run(3, "Deploy prod", "success", t0.Add(time.Minute)),       // names no sha
+		}
+		fx.tick()
+		if got := fx.state("pr", 13); got != "promoting" {
+			t.Fatalf("state %q; no run was for this merge", got)
+		}
+		fx.gh.dispatchRuns = append(fx.gh.dispatchRuns, run(4, "Deploy "+mergeSHA, "success", t0.Add(time.Minute)))
+		fx.tick()
+		if got := fx.state("pr", 13); got != "done" {
+			t.Fatalf("state %q; want done from the dispatched run whose head is %s", got, short(tip))
+		}
+	})
+
+	t.Run("webhook", func(t *testing.T) {
+		fx := setup(t)
+		body := func(title string) string {
+			return `"workflow_run":{"id":5,"path":".github/workflows/deploy-prod.yml","head_sha":"` + tip +
+				`","head_branch":"main","event":"workflow_dispatch","status":"completed","conclusion":"success","display_title":"` + title +
+				`","created_at":"` + t0.Add(time.Minute).Format(time.RFC3339) + `","head_repository":{"id":500},"repository":{"id":500}},"sender":{"id":1}`
+		}
+		if w := fx.deliver("workflow_run", "completed", body("Deploy prod")); fx.state("pr", 13) != "promoting" {
+			t.Fatalf("a run naming no sha moved the PR (%s)", w.Result)
+		}
+		if w := fx.deliver("workflow_run", "completed", body("Deploy "+mergeSHA)); fx.state("pr", 13) != "done" {
+			t.Fatalf("state %q; want done (%s)", fx.state("pr", 13), w.Result)
+		}
+	})
+}
+
+// An approval label left from an earlier visit to awaiting-merge approved
+// an earlier head. Replaying it against the head now reviewed would turn
+// chuck/loop green on a head no human approved.
+func TestTickIgnoresStaleApprovalLabel(t *testing.T) {
+	fx := newFixture(t)
+	fx.discover()
+	fx.seed("issue", 12, 0, "in-pr")
+	p := fx.gh.openPR(13, 12)
+	fx.gh.files[13] = []github.File{{Name: "db/migrations/0002.sql"}}
+	// A human approves head X.
+	fx.gh.labelBy(13, loop.LabelApproveMerge, human)
+
+	// The head moves to Y, Y is reviewed, and the PR is held again.
+	fx.now = fx.now.Add(20 * time.Minute)
+	p.Head.SHA = newHead
+	pr := fx.seed("pr", 13, 12, "awaiting-merge")
+	reviewRun(t, fx, pr.ID, newHead)
+	fx.gh.statuses[newHead] = []github.Status{{State: "pending", Context: github.StatusContext, Creator: github.User{ID: bot}}}
+	fx.tick()
+	if slices.Contains(fx.gh.setStatus, newHead+" success") {
+		t.Fatal("a label added before the PR reached awaiting-merge approved the new head")
+	}
+
+	// A label added now approves Y.
+	fx.gh.labelBy(13, loop.LabelApproveMerge, human)
+	fx.tick()
+	if !slices.Contains(fx.gh.setStatus, newHead+" success") {
+		t.Errorf("statuses %v; want %s success from the new label", fx.gh.setStatus, short(newHead))
 	}
 }
 
@@ -429,6 +517,15 @@ func TestLabelDriftRepaired(t *testing.T) {
 	fx.tick()
 	if got := fx.gh.issue(12).labels; !slices.Equal(got, []string{"bug", "loop:awaiting-approval"}) {
 		t.Errorf("labels %v", got)
+	}
+
+	// An approval label outlives its state only as a stale approval.
+	fx.gh.openPR(13, 12)
+	fx.seed("pr", 13, 12, "review")
+	fx.gh.issue(13).labels = []string{"loop:approve-merge", "loop:approve-prod", "loop:review"}
+	fx.tick()
+	if got := fx.gh.issue(13).labels; !slices.Equal(got, []string{"loop:review"}) {
+		t.Errorf("labels %v; want the approvals removed outside their states", got)
 	}
 }
 
@@ -546,5 +643,21 @@ func TestCancelRunEndsTheRunWithTheVerdict(t *testing.T) {
 	}
 	if !slices.Equal(fx.lnch.destroyed, []int64{run.ID}) {
 		t.Errorf("destroyed %v", fx.lnch.destroyed)
+	}
+}
+
+func TestTitleSHA(t *testing.T) {
+	for title, want := range map[string]string{
+		"Deploy " + mergeSHA:                      mergeSHA,
+		"deploy-prod (" + mergeSHA + ")":          mergeSHA,
+		mergeSHA + " again " + mergeSHA:           mergeSHA,
+		"Deploy " + mergeSHA + " over " + newHead: "",
+		"Deploy prod":                             "",
+		"Deploy " + mergeSHA[:39]:                 "",
+		"Deploy ABCDEF" + mergeSHA[6:]:            "", // upper case is not a sha GitHub prints
+	} {
+		if got := titleSHA(title); got != want {
+			t.Errorf("titleSHA(%q) = %q; want %q", title, got, want)
+		}
 	}
 }
