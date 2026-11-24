@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -301,6 +302,7 @@ func (m *Manager) prepare(ctx context.Context, req engine.LaunchRequest, attempt
 	if base == "" {
 		base = req.Repo.DefaultBranch
 	}
+	head := ""
 	switch req.Stage {
 	case config.StageIntake:
 		p.ref = base
@@ -320,7 +322,7 @@ func (m *Manager) prepare(ctx context.Context, req engine.LaunchRequest, attempt
 		if err != nil {
 			return p, err
 		}
-		p.ref = pr.Head.Ref
+		p.ref, head = pr.Head.Ref, pr.Head.SHA
 		if req.Stage == config.StageValidate {
 			if !pr.Merged || pr.MergeSHA == "" {
 				return p, fmt.Errorf("validate: PR #%d has no merge commit", it.Number)
@@ -341,20 +343,28 @@ func (m *Manager) prepare(ctx context.Context, req engine.LaunchRequest, attempt
 		if err != nil {
 			return p, fmt.Errorf("read feedback: %w", err)
 		}
-		reviewed := ""
+		findings := ""
 		if req.Stage == config.StageSweep {
-			if reviewed, err = m.reviewedSHA(ctx, it.ID); err != nil {
+			if findings, err = m.findingsURL(ctx, it.ID, head); err != nil {
 				return p, err
 			}
 		}
-		p.context.Feedback, p.ignored = Trusted(cs, req.Humans, req.BotID, reviewed)
+		if findings != "" && !slices.ContainsFunc(cs, func(c Comment) bool {
+			return c.AuthorID == req.BotID && c.Source == SourceConversation && c.URL == findings
+		}) {
+			// Fail closed: a sweep without the findings would triage
+			// nothing and report the PR ready.
+			return p, &engine.Escalation{Reason: "review findings: the review verdict's comment_url is not a comment of chuck's App on this PR"}
+		}
+		p.context.Feedback, p.ignored = Trusted(cs, req.Humans, req.BotID, findings)
 	}
 	return p, nil
 }
 
-// reviewedSHA is the head the item's last review verdict reported, or ""
-// if it has none.
-func (m *Manager) reviewedSHA(ctx context.Context, itemID int64) (string, error) {
+// findingsURL is the comment the item's last review verdict reported its
+// findings in, or "" when there is no review verdict or it was of a head
+// other than head.
+func (m *Manager) findingsURL(ctx context.Context, itemID int64, head string) (string, error) {
 	v, err := m.Store.LatestVerdict(ctx, itemID, string(config.StageReview))
 	if errors.Is(err, memory.ErrNotFound) {
 		return "", nil
@@ -366,7 +376,10 @@ func (m *Manager) reviewedSHA(ctx context.Context, itemID int64) (string, error)
 	if err != nil {
 		return "", fmt.Errorf("stored review verdict: %w", err)
 	}
-	return rv.Review.ReviewedSHA, nil
+	if head == "" || rv.Review.ReviewedSHA != head {
+		return "", nil
+	}
+	return rv.Review.CommentURL, nil
 }
 
 // earlierAttempts is what each earlier build attempt reported, from its

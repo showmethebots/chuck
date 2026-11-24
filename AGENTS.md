@@ -69,10 +69,12 @@ true, not before.
 - **Prompts carry feedback only from `humans` and chuck's App.**
   `worker.Trusted` decides by numeric user id, in code, before a prompt is
   built; everything else is recorded in `ignored_feedback` and is never
-  placed in a prompt by chuck. App comments count only where the spec
-  names them: sweep's review findings, from reviews and inline comments on
-  the reviewed head. Every other App comment (mentions, a worker's issue
-  comments) is left out, since it can carry one worker's text into the
+  placed in a prompt by chuck. App text counts only where the spec names
+  it: sweep gets the review run's own findings comment (the App comment at
+  the review verdict's `comment_url`, when `reviewed_sha` is the head being
+  swept), and build gets none. Every other App comment or review
+  (mentions, a worker's comments or reviews) is left out, since every
+  worker posts as the App and could carry one worker's text into the
   next. This governs chuck's prompt, not what a worker can read: its token
   and the public API reach every comment.
 - **`loop.Transition` does no I/O.** It decides from the item, the repo,

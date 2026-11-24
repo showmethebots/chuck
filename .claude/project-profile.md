@@ -168,10 +168,11 @@ tick replays, from GitHub's own event and review records), and reads
 quote a worker's words, so it defuses `@` mentions and escapes the
 hidden-marker opener in them. Feedback reaches a build or sweep prompt only
 from `humans` and chuck's App, decided by numeric user id in
-`worker.Trusted` before the prompt is built. App comments count only as
-sweep's review findings on the reviewed head (reviews and inline
-comments); the App's issue comments, including chuck's mentions, are left
-out because a worker can post as the App. Everything left out is recorded
+`worker.Trusted` before the prompt is built. App text counts only as
+sweep's review findings: the one App comment at the review verdict's
+`comment_url`, when `reviewed_sha` is the head being swept. Build gets no
+App text, and every other App comment or review, including chuck's
+mentions, is left out because every worker posts as the App. Everything left out is recorded
 in `ignored_feedback`. The filter governs only the prompt chuck builds: a
 worker can still read any comment itself with its token or the public
 API, so the controls behind it are the fresh review of the head, the

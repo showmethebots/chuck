@@ -17,15 +17,23 @@ import (
 const MaxStartFailures = engine.EscalateAfter
 
 // neverStarted counts the earlier runs of run's attempt that ended without
-// starting: failed launches and Machines that never fetched their spec.
+// starting (failed launches and Machines that never fetched their spec)
+// since the item entered its current state. A same-attempt relaunch keeps
+// the state, so those add up; a human re-queue after the escalation moves
+// it, so the re-queued item gets its own tries.
 func (m *Manager) neverStarted(ctx context.Context, run memory.Run) (int, error) {
+	it, err := m.Store.ItemByID(ctx, run.ItemID)
+	if err != nil {
+		return 0, err
+	}
 	runs, err := m.Store.RunsForItem(ctx, run.ItemID, run.Stage)
 	if err != nil {
 		return 0, err
 	}
 	n := 0
 	for _, r := range runs {
-		if r.ID != run.ID && r.Attempt == run.Attempt && r.Status == memory.RunFailed && r.StartedAt.IsZero() {
+		if r.ID != run.ID && r.Attempt == run.Attempt && r.Status == memory.RunFailed && r.StartedAt.IsZero() &&
+			!r.CreatedAt.Before(it.StateSince) {
 			n++
 		}
 	}

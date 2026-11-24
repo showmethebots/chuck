@@ -472,8 +472,13 @@ chuck decides whose feedback counts before it builds a prompt, and the
 prompt never sees the rest:
 
 - Sweep and build receive review comments, PR comments and issue comments
-  only from users in `humans` and from chuck's own App (the review stage
-  posts as the App). Everything else is omitted from the prompt and
+  only from users in `humans`, plus, for sweep, the one comment the review
+  run posted its findings in: the App's comment at the review verdict's
+  `comment_url`, when `reviewed_sha` is the head being swept. Every other
+  App comment is left out, since every worker posts as the App, and build
+  gets no App text. If no App comment is at that URL, the sweep escalates
+  instead of running, since a sweep without the findings would report the
+  PR ready. Everything else is omitted from the prompt and
   listed on the item page as "ignored feedback" with the author.
 - `issues.labeled`, `pull_request.labeled` and `pull_request.synchronize`
   transition only when the sender is in `humans`, as the table says.

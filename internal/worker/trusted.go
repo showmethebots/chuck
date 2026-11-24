@@ -14,7 +14,7 @@ import (
 const (
 	IgnoredUntrusted    = "untrusted_author"
 	IgnoredChuckMention = "chuck_mention"
-	// An App comment outside sweep's review findings on the reviewed head.
+	// An App comment other than the review run's own findings comment.
 	IgnoredAppComment = "app_comment"
 )
 
@@ -43,20 +43,21 @@ type Comment struct {
 // Trusted splits feedback into what may reach a prompt and what is
 // recorded as ignored. A comment counts only when its author is in humans,
 // or is chuck's App in the one place the spec names: the review stage's
-// findings, as a review or inline comment on reviewedSHA, the head the
-// last review verdict reported. This is the defence against a stranger on
-// a public repo steering sweep into pushing their commit, so it is decided
-// here, in code, by numeric user id, and never by an instruction to the
-// model.
+// findings, which the review run posts as one conversation comment and
+// reports as its verdict's comment_url. findingsURL is that URL, set only
+// when the review was of the head being swept. This is the defence
+// against a stranger on a public repo steering sweep into pushing their
+// commit, so it is decided here, in code, by numeric user id, and never
+// by an instruction to the model.
 //
-// App comments are narrowed because every worker posts as the App: an
-// intake worker reading a stranger's issue, or a review worker quoting a
-// stranger's PR comment, could otherwise leave text that the next run
-// trusts. The executor's mentions quote workers' words back too. So the
-// App's conversation comments never count, and its reviews count only on
-// the head that was reviewed. reviewedSHA "" (a build, which has no
-// review) trusts no App comment at all.
-func Trusted(cs []Comment, humans []int64, bot int64, reviewedSHA string) (kept []loop.Feedback, ignored []memory.IgnoredFeedback) {
+// App comments are narrowed to that one URL because every worker posts
+// as the App: an intake worker reading a stranger's issue, a review worker
+// quoting a stranger's PR comment, or a build or sweep worker submitting a
+// review on the head it pushed could otherwise leave text the next run
+// trusts. The executor's mentions quote workers' words back too. So no
+// other App comment counts, from any source, and findingsURL "" (a build,
+// or a sweep whose review was of another head) trusts no App comment.
+func Trusted(cs []Comment, humans []int64, bot int64, findingsURL string) (kept []loop.Feedback, ignored []memory.IgnoredFeedback) {
 	for _, c := range cs {
 		switch {
 		case c.AuthorID == 0:
@@ -64,7 +65,7 @@ func Trusted(cs []Comment, humans []int64, bot int64, reviewedSHA string) (kept 
 			ignored = append(ignored, ignoredFrom(c, IgnoredUntrusted))
 		case c.AuthorID == bot && strings.Contains(c.Body, mentionMarker):
 			ignored = append(ignored, ignoredFrom(c, IgnoredChuckMention))
-		case c.AuthorID == bot && (c.Source == SourceConversation || reviewedSHA == "" || c.CommitID != reviewedSHA):
+		case c.AuthorID == bot && (findingsURL == "" || c.Source != SourceConversation || c.URL != findingsURL):
 			ignored = append(ignored, ignoredFrom(c, IgnoredAppComment))
 		case c.AuthorID == bot || slices.Contains(humans, c.AuthorID):
 			if strings.TrimSpace(c.Body) == "" {

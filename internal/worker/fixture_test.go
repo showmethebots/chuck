@@ -207,8 +207,9 @@ func (fx *fixture) item(kind string, number int, state string) memory.Item {
 	return it
 }
 
-// reviewed records a finished review run on a PR item that reported sha.
-func (fx *fixture) reviewed(it memory.Item, sha string) {
+// reviewed records a finished review run on a PR item that reported sha,
+// with its findings posted at url.
+func (fx *fixture) reviewed(it memory.Item, sha, url string) {
 	fx.t.Helper()
 	r, err := fx.store.InsertRun(fx.ctx, memory.Run{ItemID: it.ID, Stage: "review", Image: "i", Model: "m",
 		Credential: memory.CredentialAPIKey, Prompt: "p", SchemaName: "review", Ref: "r",
@@ -217,7 +218,7 @@ func (fx *fixture) reviewed(it memory.Item, sha string) {
 		fx.t.Fatal(err)
 	}
 	_ = fx.store.MarkRunRunning(fx.ctx, r.ID, fx.now)
-	v := `{"outcome":"posted","summary":"s","reviewed_sha":"` + sha + `","comment_url":"https://x","findings_count":1,"skills_not_run":[]}`
+	v := `{"outcome":"posted","summary":"s","reviewed_sha":"` + sha + `","comment_url":"` + url + `","findings_count":1,"skills_not_run":[]}`
 	if err := fx.store.EndRun(fx.ctx, r.ID, memory.RunEnd{Status: memory.RunFinished, VerdictJSON: v}, fx.now); err != nil {
 		fx.t.Fatal(err)
 	}
