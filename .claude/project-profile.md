@@ -166,8 +166,40 @@ in `humans` (by numeric id, from the signed payload or, for a delivery the
 tick replays, from GitHub's own event and review records), and reads
 `chuck/loop` only from statuses chuck's App set. Comments chuck posts can
 quote a worker's words, so it defuses `@` mentions and escapes the
-hidden-marker opener in them. Prompt text is filtered in #27 (the spec's
-"Trusted text").
+hidden-marker opener in them. Feedback reaches a build or sweep prompt only
+from `humans` and chuck's App, decided by numeric user id in
+`worker.Trusted` before the prompt is built. App text counts only as
+sweep's review findings: the one App comment at the review verdict's
+`comment_url`, when `reviewed_sha` is the head being swept. Any worker's
+token can edit an App comment, so the review verdict reports the sha256
+of the body as posted, chuck records it only if the comment still matches
+when it accepts the verdict, and a missing, edited or unrecorded findings
+comment escalates the sweep. Build gets no
+App text, and every other App comment or review, including chuck's
+mentions, is left out because every worker posts as the App. Everything left out is recorded
+in `ignored_feedback`. The filter governs only the prompt chuck builds: a
+worker can still read any comment itself with its token or the public
+API, so the controls behind it are the fresh review of the head, the
+risk-path hold and the worker's egress limits (#29).
+
+Workers are the second inbound path. `/api/runs/{id}/spec`, `/token` and
+`/verdict` are public routes authenticated only by the run's own token (32
+random bytes, stored as its sha256), checked against the run in the path,
+and refused once the run has ended; a worker's Machine is given that token
+and `CHUCK_URL`/`CHUCK_RUN_ID`, nothing else. A worker is untrusted: it
+runs a model over a public repo's text, so what it posts is validated
+against the stage schema again (a failure escalates), its evidence tar is
+capped at 20 MB with paths cleaned, and its GitHub token is minted per call
+from `github.StagePermissions` (never `statuses`, read-only for validate).
+chuck's outbound calls gain Fly's Machines API, with an API token scoped to
+the workers app (`FLY_WORKERS_API_TOKEN`), which never reaches a worker. Workers run
+model-driven code, so `chuck-workers` lives on its own Fly network, not
+the organization's default one: on the default network a worker could
+reach chuck directly, skipping the proxy and `Fly-Client-IP`, and every
+other app in the organization over its private address (#34 creates the
+app with `--network`). Worker GitHub tokens are revoked when their run
+ends; one minted before a chuck restart is not, and lives out GitHub's
+one-hour TTL.
 
 The loop is on only when every `${VAR}` in `config/chuck.yaml` resolves;
 until then deliveries are stored as handled and nothing acts on them. The loop's own model (GitHub App tokens scoped
@@ -187,6 +219,7 @@ in the spec's "Identities", "Who can merge", "The Claude proxy" and
 | `internal/memory/**` | client-data |
 | `internal/loop/**` | authorization, client-data |
 | `internal/engine/**` | authorization, client-data, secrets |
+| `internal/worker/**` | auth-session, authorization, client-data, secrets |
 | `cmd/**` | secrets, client-data |
 | `deploy/**` | auth-session, secrets, supply-chain |
 | `Dockerfile` | supply-chain, secrets |
@@ -233,7 +266,10 @@ set` and which is kept for the loop's Claude proxy. With the loop off, chuck
 reads only the webhook secret; turning it on means setting every
 reference in `config/chuck.yaml`. The Slack secrets are unset by
 `docs/phase-1-human-steps.md` section 2. The loop's new secrets are listed
-in the delivery loop spec's "Rollout / Phase 0"; their setup steps will
+in the delivery loop spec's "Rollout / Phase 0", plus the workers'
+`FLY_WORKERS_API_TOKEN` and each repo's validate credentials in
+`LOOP_ENV_<OWNER>_<REPO>` (served only in a validate run's spec, never in a
+Machine's config); their setup steps will
 live in `docs/phase-0-human-steps.md`, which issue #34 writes and which does
 not exist yet. `config/chuck.yaml` names secrets only as
 `${VAR}` references, which `internal/config` enforces. `deploy/fly.toml` `[env]`, `Dockerfile` `ENV` and `config/`
@@ -248,6 +284,10 @@ which `make deploy` sends to Fly's remote builder.
 
 ## Known gaps
 
+- **open:** `chuck-workers` must be created on its own Fly network
+  (`fly apps create chuck-workers --network <name>`), so workers cannot
+  reach chuck or other apps over the organization's private network. A
+  #34 human step; until then no worker runs.
 - **open:** Docker base images (`Dockerfile`, `deploy/worker.Dockerfile`) use
   mutable tags, not digests. This was recorded when the Phase 0 scaffold was
   committed.

@@ -55,6 +55,30 @@ true, not before.
   row, abandons an effect after three failing ticks and escalates the
   item. So every effect must be safe to run twice: a merge re-reads the
   PR and is never retried once the head has moved from the swept sha.
+- **A worker holds its run token and nothing else of chuck's.** Its
+  Machine's environment is exactly `CHUCK_URL`, `CHUCK_RUN_ID` and
+  `CHUCK_RUN_TOKEN` (`TestMachineEnvIsOnlyTheRunVariables`): the Machine
+  config is readable by anything holding the workers app's token. The
+  prompt, GitHub tokens and validate credentials come from the run API,
+  which refuses the token once the run leaves `running`. chuck's App key,
+  its own installation tokens and the Claude credentials never leave chuck.
+- **No worker token carries `statuses`, and validate's is read-only.**
+  `github.StagePermissions` is the only source of a worker's permission
+  set, `WorkerToken` refuses a token GitHub widened, and the run API
+  checks again before serving one. So no worker can set `chuck/loop`.
+- **Prompts carry feedback only from `humans` and chuck's App.**
+  `worker.Trusted` decides by numeric user id, in code, before a prompt is
+  built; everything else is recorded in `ignored_feedback` and is never
+  placed in a prompt by chuck. App text counts only where the spec names
+  it: sweep gets the review run's own findings comment (the App comment at
+  the review verdict's `comment_url`, when `reviewed_sha` is the head being
+  swept and its body still hashes to the verdict's `comment_sha256`, the
+  hash of the body as posted; otherwise the sweep escalates), and build
+  gets none. Every other App comment or review
+  (mentions, a worker's comments or reviews) is left out, since every
+  worker posts as the App and could carry one worker's text into the
+  next. This governs chuck's prompt, not what a worker can read: its token
+  and the public API reach every comment.
 - **`loop.Transition` does no I/O.** It decides from the item, the repo,
   the config, the input and the `Facts` the caller gathered, and returns
   changes and effects. The package imports no network, database or

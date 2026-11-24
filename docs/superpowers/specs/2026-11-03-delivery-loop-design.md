@@ -420,8 +420,16 @@ cap the item goes to `needs-human` with reason "budget".
 
 ### Back in chuck
 
+- A run is `launching` until its worker first fetches its spec, which is
+  the proof the Machine started; the token and verdict endpoints refuse a
+  run that is not yet `running`. A Machine that has not fetched its spec
+  ten minutes after launch failed to start.
 - The verdict endpoint accepts one post per run, only while `running`,
-  only with the matching token hash. It validates against the stage
+  only with the matching token hash. The post is `multipart/form-data`: a
+  `verdict` JSON part first (structured output or the worker's own error,
+  exit code, duration, log tail), then for validate an optional
+  `evidence` tar. A post after the run ended gets 409, which tells the
+  worker's retry loop to stop. It validates against the stage
   schema again. Then it feeds a `Verdict` input to the loop.
 - A watcher polls the Machines API every 30 s for `running` rows. Machine
   gone without a verdict → `failed`, `error` verdict. Ten minutes past
@@ -464,8 +472,20 @@ chuck decides whose feedback counts before it builds a prompt, and the
 prompt never sees the rest:
 
 - Sweep and build receive review comments, PR comments and issue comments
-  only from users in `humans` and from chuck's own App (the review stage
-  posts as the App). Everything else is omitted from the prompt and
+  only from users in `humans`, plus, for sweep, the one comment the review
+  run posted its findings in: the App's comment at the review verdict's
+  `comment_url`, when `reviewed_sha` is the head being swept. Every other
+  App comment is left out, since every worker posts as the App, and build
+  gets no App text. The review verdict carries `comment_sha256`, the
+  hash of the body its create-comment call returned. chuck records it
+  (`review_findings`) only if the comment, read as the App when the
+  verdict is accepted, still hashes to that, and sweep uses the comment
+  only while it still does, since every worker's token can edit any App
+  comment. Anchoring the hash to the post, not to a later read, catches
+  an edit at any time, including one inside the second GitHub's
+  timestamps resolve. If the comment is missing, was edited,
+  or was never recorded, the sweep escalates instead of running, since a
+  sweep without the real findings would report the PR ready. Everything else is omitted from the prompt and
   listed on the item page as "ignored feedback" with the author.
 - `issues.labeled`, `pull_request.labeled` and `pull_request.synchronize`
   transition only when the sender is in `humans`, as the table says.

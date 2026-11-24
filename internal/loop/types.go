@@ -166,6 +166,10 @@ type VerdictInput struct {
 	// Machine never started, or the API key ran out of credit): relaunch
 	// the stage as the same attempt, whatever the caps say.
 	SameAttempt bool
+	// Escalate sends the item to needs-human whatever attempts remain: the
+	// run's report could not be trusted (it failed its schema), so another
+	// attempt would only repeat it unseen.
+	Escalate bool
 }
 
 // DashboardAction is a button on the dashboard.

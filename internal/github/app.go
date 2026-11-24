@@ -230,6 +230,21 @@ func (a *App) mint(ctx context.Context, installationID int64, repo string, perms
 	return t, nil
 }
 
+// RevokeToken revokes an installation token, authenticated as the token
+// itself. A token already expired or revoked answers 401, which is success
+// here: either way it no longer works. baseURL "" means DefaultBaseURL.
+func RevokeToken(ctx context.Context, hc *http.Client, baseURL, token string) error {
+	if baseURL == "" {
+		baseURL = DefaultBaseURL
+	}
+	a := &App{BaseURL: baseURL, HTTP: hc}
+	err := a.do(ctx, "token "+token, http.MethodDelete, "/installation/token", nil, nil)
+	if IsStatus(err, http.StatusUnauthorized) {
+		return nil
+	}
+	return err
+}
+
 // APIError is a non-2xx answer from GitHub.
 type APIError struct {
 	Status  int

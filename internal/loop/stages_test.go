@@ -93,9 +93,9 @@ func TestParseVerdictRejects(t *testing.T) {
 		want  string
 	}{
 		{"not JSON", config.StageReview, `{`, "not JSON"},
-		{"unknown outcome", config.StageReview, `{"outcome":"approved","summary":"","reviewed_sha":` + sha + `,"comment_url":"","findings_count":0,"skills_not_run":[]}`, "outcome"},
-		{"extra field", config.StageReview, `{"outcome":"posted","summary":"","reviewed_sha":` + sha + `,"comment_url":"","findings_count":0,"skills_not_run":[],"merge":true}`, "merge"},
-		{"missing field", config.StageReview, `{"outcome":"posted","summary":"","comment_url":"","findings_count":0,"skills_not_run":[]}`, "reviewed_sha"},
+		{"unknown outcome", config.StageReview, `{"outcome":"approved","summary":"","reviewed_sha":` + sha + `,"comment_url":"","comment_sha256":"","findings_count":0,"skills_not_run":[]}`, "outcome"},
+		{"extra field", config.StageReview, `{"outcome":"posted","summary":"","reviewed_sha":` + sha + `,"comment_url":"","comment_sha256":"","findings_count":0,"skills_not_run":[],"merge":true}`, "merge"},
+		{"missing field", config.StageReview, `{"outcome":"posted","summary":"","comment_url":"","comment_sha256":"","findings_count":0,"skills_not_run":[]}`, "reviewed_sha"},
 		{"short sha", config.StageSweep, `{"outcome":"ready","summary":"","head_sha":"abc","findings":[],"blockers":[]}`, "head_sha"},
 		{"pr_opened without a PR", config.StageBuild, `{"outcome":"pr_opened","summary":"","pr_number":null,"tests_added":[],"tests_retired":[],"blockers":[],"skills_not_run":[]}`, "needs pr_number"},
 		{"blocked without a blocker", config.StageBuild, `{"outcome":"blocked","summary":"","pr_number":null,"tests_added":[],"tests_retired":[],"blockers":[],"skills_not_run":[]}`, "needs at least one blocker"},
@@ -106,8 +106,9 @@ func TestParseVerdictRejects(t *testing.T) {
 		{"pass that is not", config.StageValidate, `{"outcome":"pass","summary":"","tested_sha":` + sha + `,"criteria":[{"id":"AC-1","result":"undetermined","evidence":[],"notes":""}],"regressions":[]}`, "AC-1 is undetermined"},
 		{"pass with no criteria", config.StageValidate, `{"outcome":"pass","summary":"","tested_sha":` + sha + `,"criteria":[],"regressions":[]}`, "no criteria"},
 		{"pass with no regressions", config.StageValidate, `{"outcome":"pass","summary":"","tested_sha":` + sha + `,"criteria":[{"id":"AC-1","result":"pass","evidence":[],"notes":""}],"regressions":[]}`, "no regressions"},
-		{"javascript url", config.StageReview, `{"outcome":"posted","summary":"","reviewed_sha":` + sha + `,"comment_url":"javascript:alert(1)","findings_count":0,"skills_not_run":[]}`, "comment_url"},
-		{"overlong summary", config.StageReview, `{"outcome":"posted","summary":"` + strings.Repeat("x", 2001) + `","reviewed_sha":` + sha + `,"comment_url":"","findings_count":0,"skills_not_run":[]}`, "summary"},
+		{"bad comment hash", config.StageReview, `{"outcome":"posted","summary":"","reviewed_sha":` + sha + `,"comment_url":"","comment_sha256":"ABC","findings_count":0,"skills_not_run":[]}`, "comment_sha256"},
+		{"javascript url", config.StageReview, `{"outcome":"posted","summary":"","reviewed_sha":` + sha + `,"comment_url":"javascript:alert(1)","comment_sha256":"","findings_count":0,"skills_not_run":[]}`, "comment_url"},
+		{"overlong summary", config.StageReview, `{"outcome":"posted","summary":"` + strings.Repeat("x", 2001) + `","reviewed_sha":` + sha + `,"comment_url":"","comment_sha256":"","findings_count":0,"skills_not_run":[]}`, "summary"},
 	}
 	for _, c := range cases {
 		_, err := ParseVerdict(c.stage, []byte(c.json))

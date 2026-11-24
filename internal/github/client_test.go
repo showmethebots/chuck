@@ -439,3 +439,27 @@ func TestReadLoopConfigByBlobSHA(t *testing.T) {
 		t.Error("directory read as a file")
 	}
 }
+
+func TestRevokeToken(t *testing.T) {
+	var gotAuth, gotMethod, gotPath string
+	status := http.StatusNoContent
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth, gotMethod, gotPath = r.Header.Get("Authorization"), r.Method, r.URL.Path
+		w.WriteHeader(status)
+	}))
+	defer srv.Close()
+	if err := RevokeToken(context.Background(), srv.Client(), srv.URL, "ghs_x"); err != nil {
+		t.Fatal(err)
+	}
+	if gotAuth != "token ghs_x" || gotMethod != http.MethodDelete || gotPath != "/installation/token" {
+		t.Errorf("request %s %s auth %q", gotMethod, gotPath, gotAuth)
+	}
+	status = http.StatusUnauthorized // already revoked or expired
+	if err := RevokeToken(context.Background(), srv.Client(), srv.URL, "ghs_x"); err != nil {
+		t.Errorf("401: %v; an expired token is already revoked", err)
+	}
+	status = http.StatusBadGateway
+	if err := RevokeToken(context.Background(), srv.Client(), srv.URL, "ghs_x"); err == nil {
+		t.Error("a 502 was taken as revoked")
+	}
+}

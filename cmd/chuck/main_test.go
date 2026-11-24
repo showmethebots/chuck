@@ -161,7 +161,7 @@ func TestLoopTurnsOnOnlyWhenEveryReferenceResolves(t *testing.T) {
 				partial[k] = v
 			}
 		}
-		eng, err := newEngine(c, env(partial), nil, log)
+		eng, _, err := newEngine(c, env(partial), nil, log)
 		if err != nil || eng != nil {
 			t.Errorf("without %s: engine %v, err %v; want the loop off", missing, eng != nil, err)
 		}
@@ -169,11 +169,63 @@ func TestLoopTurnsOnOnlyWhenEveryReferenceResolves(t *testing.T) {
 	if strings.Contains(logs.String(), "secret-value") || strings.Contains(logs.String(), "PRIVATE KEY") {
 		t.Errorf("a secret reached the log: %s", logs.String())
 	}
-	eng, err := newEngine(c, env(full), nil, log)
+	eng, workers, err := newEngine(c, env(full), nil, log)
 	if err != nil || eng == nil {
 		t.Fatalf("with everything set: %v, %v", eng, err)
 	}
 	if eng.Tick != 30*time.Minute || len(eng.Humans) != 1 || len(eng.GitHub.Apps()) != 1 {
 		t.Errorf("engine %+v", eng)
+	}
+	if workers != nil || eng.Launcher != nil {
+		t.Errorf("workers on with no launcher configured")
+	}
+}
+
+func TestWorkersNeedOneLauncherAndASafeURL(t *testing.T) {
+	c, err := checkConfigDir("../../config")
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pemKey := string(pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)}))
+	base := func() map[string]string {
+		return map[string]string{
+			"GITHUB_APP_ID": "123", "GITHUB_APP_PRIVATE_KEY": pemKey,
+			"GITHUB_OAUTH_CLIENT_ID": "Iv1.x", "GITHUB_OAUTH_CLIENT_SECRET": "s",
+			"CHUCK_WORKER_IMAGE": "registry.fly.io/chuck-workers:abc",
+		}
+	}
+	log := slog.New(slog.DiscardHandler)
+	for _, tc := range []struct {
+		name string
+		set  map[string]string
+		ok   bool
+	}{
+		{"fly", map[string]string{"FLY_WORKERS_API_TOKEN": "t", "CHUCK_PUBLIC_URL": "https://chuck.example.com/"}, true},
+		{"local", map[string]string{"CHUCK_WORKER_LOCAL_BIN": "/bin/true", "CHUCK_PUBLIC_URL": "http://localhost:8080"}, true},
+		{"both", map[string]string{"FLY_WORKERS_API_TOKEN": "t", "CHUCK_WORKER_LOCAL_BIN": "/bin/true", "CHUCK_PUBLIC_URL": "https://c.example.com"}, false},
+		{"no url", map[string]string{"FLY_WORKERS_API_TOKEN": "t"}, false},
+		{"plain http off localhost", map[string]string{"FLY_WORKERS_API_TOKEN": "t", "CHUCK_PUBLIC_URL": "http://chuck.example.com"}, false},
+		{"userinfo", map[string]string{"FLY_WORKERS_API_TOKEN": "t", "CHUCK_PUBLIC_URL": "https://u:p@chuck.example.com"}, false},
+	} {
+		e := base()
+		for k, v := range tc.set {
+			e[k] = v
+		}
+		eng, workers, err := newEngine(c, env(e), nil, log)
+		if tc.ok {
+			if err != nil || workers == nil || eng.Launcher == nil {
+				t.Errorf("%s: workers %v, err %v", tc.name, workers != nil, err)
+			} else if strings.HasSuffix(workers.URL, "/") {
+				t.Errorf("%s: URL %q keeps its trailing slash", tc.name, workers.URL)
+			}
+			continue
+		}
+		if err == nil {
+			t.Errorf("%s: accepted", tc.name)
+		}
 	}
 }

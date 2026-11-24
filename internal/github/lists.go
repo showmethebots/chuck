@@ -113,6 +113,8 @@ type Review struct {
 	User     User   `json:"user"`
 	State    string `json:"state"` // APPROVED, CHANGES_REQUESTED, COMMENTED, DISMISSED, PENDING
 	CommitID string `json:"commit_id"`
+	Body     string `json:"body"`
+	HTMLURL  string `json:"html_url"`
 }
 
 // Reviews lists a PR's reviews, oldest first.
@@ -120,6 +122,26 @@ func (c *Client) Reviews(ctx context.Context, number int) ([]Review, error) {
 	return pages(func(page int) ([]Review, error) {
 		var out []Review
 		err := c.call(ctx, http.MethodGet, c.repoPath("/pulls/%d/reviews?per_page=100&page=%d", number, page), nil, &out)
+		return out, err
+	})
+}
+
+// ReviewComment is one inline comment on a PR's diff, with its author for
+// the trusted-text filter.
+type ReviewComment struct {
+	ID       int64  `json:"id"`
+	HTMLURL  string `json:"html_url"`
+	Body     string `json:"body"`
+	Path     string `json:"path"`
+	CommitID string `json:"commit_id"`
+	User     User   `json:"user"`
+}
+
+// ReviewComments lists a PR's inline review comments, oldest first.
+func (c *Client) ReviewComments(ctx context.Context, number int) ([]ReviewComment, error) {
+	return pages(func(page int) ([]ReviewComment, error) {
+		var out []ReviewComment
+		err := c.call(ctx, http.MethodGet, c.repoPath("/pulls/%d/comments?per_page=100&page=%d", number, page), nil, &out)
 		return out, err
 	})
 }

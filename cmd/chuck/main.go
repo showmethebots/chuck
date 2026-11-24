@@ -18,6 +18,18 @@
 //	GITHUB_APP_WEBHOOK_SECRET  turns on POST /webhooks/github; deliveries must be signed with it
 //	CHUCK_WEBHOOK_ALLOW_ANY_IP 1 accepts deliveries from any IP, for local development through a
 //	                           tunnel; otherwise Fly-Client-IP must be in GitHub's hook ranges
+//
+// Workers launch only when the loop is on and one launcher is configured.
+// Without one, launch effects fail on their transition rows and escalate.
+//
+//	CHUCK_PUBLIC_URL           chuck as a worker reaches it (https, or http on localhost); workers
+//	                           call the run API and the Claude proxy under it
+//	FLY_WORKERS_API_TOKEN      launches workers as Machines in workers.fly_app; a token scoped to
+//	                           that app, never given to a worker
+//	CHUCK_WORKER_REGION        Fly region for worker Machines (default: Fly chooses)
+//	CHUCK_WORKER_LOCAL_BIN     launches workers as child processes of this binary, for a laptop
+//	LOOP_ENV_<OWNER>_<REPO>    a repo's validate credentials as dotenv lines, served only in a
+//	                           validate run's spec
 package main
 
 import (
@@ -29,10 +41,12 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -43,6 +57,7 @@ import (
 	"github.com/showmethebots/chuck/internal/github"
 	"github.com/showmethebots/chuck/internal/memory"
 	"github.com/showmethebots/chuck/internal/web"
+	"github.com/showmethebots/chuck/internal/worker"
 )
 
 // version is set at build time with -ldflags "-X main.version=...".
@@ -176,13 +191,18 @@ func runServer(ctx context.Context, log *slog.Logger, getenv func(string) string
 		Log: log, Interval: interval, Version: version, BootCount: boots,
 		Integrations: integrations(secret),
 	}
-	eng, err := newEngine(chuckCfg, getenv, store, log)
+	eng, workers, err := newEngine(chuckCfg, getenv, store, log)
 	if err != nil {
 		return err
 	}
 	if eng != nil {
 		srv.Background = append(srv.Background, eng.Run)
 		srv.Integrations = append(srv.Integrations, "loop")
+	}
+	if workers != nil {
+		srv.Runs = workers.Handler()
+		srv.Background = append(srv.Background, workers.Watch)
+		srv.Integrations = append(srv.Integrations, "workers")
 	}
 	if secret != "" {
 		rcv := &github.Receiver{Secret: []byte(secret), Store: store, Log: log}
@@ -205,22 +225,23 @@ func runServer(ctx context.Context, log *slog.Logger, getenv func(string) string
 // newEngine builds the loop from config/chuck.yaml once every reference in
 // it resolves, OAuth ones included, so the loop never runs half
 // configured. With any unset or malformed it returns nil and logs which
-// (never a value): /healthz and the webhook keep serving either way.
-func newEngine(c *config.Chuck, getenv func(string) string, store *memory.Store, log *slog.Logger) (*engine.Engine, error) {
+// (never a value): /healthz and the webhook keep serving either way. The
+// workers come with it when a launcher is configured.
+func newEngine(c *config.Chuck, getenv func(string) string, store *memory.Store, log *slog.Logger) (*engine.Engine, *worker.Manager, error) {
 	r, err := c.Resolve(getenv)
 	if err != nil {
 		log.Warn("loop off: config/chuck.yaml is not fully resolved", "why", err.Error())
-		return nil, nil
+		return nil, nil, nil
 	}
 	src := &engine.AppSource{ByOwner: map[string]*github.App{}}
 	for _, a := range r.Apps {
 		id, err := strconv.ParseInt(a.AppID, 10, 64)
 		if err != nil {
-			return nil, fmt.Errorf("app %s: app_id: %w", a.Owner, err)
+			return nil, nil, fmt.Errorf("app %s: app_id: %w", a.Owner, err)
 		}
 		key, err := github.ParsePrivateKey([]byte(a.PrivateKey))
 		if err != nil {
-			return nil, fmt.Errorf("app %s: %w", a.Owner, err)
+			return nil, nil, fmt.Errorf("app %s: %w", a.Owner, err)
 		}
 		src.ByOwner[a.Owner] = &github.App{ID: id, Key: key}
 		src.Order = append(src.Order, a.Owner)
@@ -230,10 +251,63 @@ func newEngine(c *config.Chuck, getenv func(string) string, store *memory.Store,
 		humans = append(humans, h.ID)
 	}
 	log.Info("loop on", "apps", src.Order, "tick", r.Tick.Std().String())
-	return &engine.Engine{
+	eng := &engine.Engine{
 		Store: store, GitHub: src, Humans: humans, Log: log,
 		Tick: r.Tick.Std(), Retention: r.WebhookRetention.Std(),
-	}, nil
+	}
+	l, err := newLauncher(r, getenv)
+	if err != nil {
+		return nil, nil, err
+	}
+	if l == nil {
+		log.Warn("workers off: set FLY_WORKERS_API_TOKEN or CHUCK_WORKER_LOCAL_BIN, and CHUCK_PUBLIC_URL; " +
+			"until then every launch fails on its transition row")
+		return eng, nil, nil
+	}
+	pub, err := publicURL(getenv("CHUCK_PUBLIC_URL"))
+	if err != nil {
+		return nil, nil, err
+	}
+	m := &worker.Manager{
+		Store: store, Launcher: l, Tokens: src, Repos: src, Verdicts: eng, URL: pub,
+		Image: r.Workers.Image, WallClockCeiling: r.Workers.WallClockCeiling.Std(), Spend: r.Spend,
+		Getenv: getenv, Log: log,
+	}
+	eng.Launcher = m
+	log.Info("workers on", "launcher", fmt.Sprintf("%T", l), "url", pub)
+	return eng, m, nil
+}
+
+// newLauncher picks the one launcher the environment names.
+func newLauncher(r *config.Chuck, getenv func(string) string) (worker.Launcher, error) {
+	fly, local := getenv("FLY_WORKERS_API_TOKEN"), getenv("CHUCK_WORKER_LOCAL_BIN")
+	switch {
+	case fly != "" && local != "":
+		return nil, errors.New("set FLY_WORKERS_API_TOKEN or CHUCK_WORKER_LOCAL_BIN, not both")
+	case fly != "":
+		return &worker.Fly{App: r.Workers.FlyApp, Token: fly, Region: getenv("CHUCK_WORKER_REGION")}, nil
+	case local != "":
+		return &worker.Local{Bin: local}, nil
+	}
+	return nil, nil
+}
+
+// publicURL checks CHUCK_PUBLIC_URL. A worker sends its run token to it,
+// so it is https, or plain http only to this machine for local testing.
+func publicURL(v string) (string, error) {
+	if v == "" {
+		return "", errors.New("CHUCK_PUBLIC_URL: required when a worker launcher is set")
+	}
+	u, err := url.Parse(v)
+	if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return "", fmt.Errorf("CHUCK_PUBLIC_URL: want a bare origin like https://chuck.example.com, got %q", v)
+	}
+	host := u.Hostname()
+	local := host == "localhost" || host == "127.0.0.1" || host == "::1"
+	if u.Scheme != "https" && (u.Scheme != "http" || !local) {
+		return "", fmt.Errorf("CHUCK_PUBLIC_URL: want https (http only on localhost), got %q", v)
+	}
+	return strings.TrimRight(u.String(), "/"), nil
 }
 
 // integrations names what the environment switched on, for logs and

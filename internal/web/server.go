@@ -1,7 +1,7 @@
 // Package web is chuck's HTTP surface and process lifetime: it serves
-// /healthz and the GitHub webhook, logs a heartbeat, and runs background
-// jobs for its lifetime. The dashboard and worker API mount here as they
-// land.
+// /healthz, the GitHub webhook and the worker run API, logs a heartbeat,
+// and runs background jobs for its lifetime. The dashboard mounts here
+// when it lands.
 package web
 
 import (
@@ -25,6 +25,9 @@ type Server struct {
 	// Webhook receives GitHub deliveries at POST /webhooks/github. Nil leaves
 	// the route unmounted.
 	Webhook http.Handler
+	// Runs is the worker run API under /api/runs/, authenticated by each
+	// run's own token. Nil leaves it unmounted.
+	Runs http.Handler
 	// Integrations names what the environment switched on, for /healthz.
 	Integrations []string
 	// Background jobs run for the daemon's lifetime and must return once
@@ -116,6 +119,9 @@ func (d *Server) Handler() http.Handler {
 	})
 	if d.Webhook != nil {
 		mux.Handle("POST /webhooks/github", d.Webhook)
+	}
+	if d.Runs != nil {
+		mux.Handle("/api/runs/", d.Runs)
 	}
 	return mux
 }

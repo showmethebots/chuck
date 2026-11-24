@@ -54,6 +54,7 @@ type ReviewVerdict struct {
 	Summary       string   `json:"summary"`
 	ReviewedSHA   string   `json:"reviewed_sha"`
 	CommentURL    string   `json:"comment_url"`
+	CommentSHA256 string   `json:"comment_sha256"`
 	FindingsCount int      `json:"findings_count"`
 	SkillsNotRun  []string `json:"skills_not_run"`
 }

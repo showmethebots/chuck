@@ -151,6 +151,23 @@ func TestWebhookRouteOnlyWhenConfigured(t *testing.T) {
 	}
 }
 
+func TestRunAPIRouteOnlyWhenConfigured(t *testing.T) {
+	d := newServer(&syncBuffer{})
+	rec := httptest.NewRecorder()
+	d.Handler().ServeHTTP(rec, httptest.NewRequest("GET", "/api/runs/1/spec", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("unconfigured run API: status %d, want 404", rec.Code)
+	}
+	d.Runs = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusTeapot) })
+	for _, p := range []string{"/api/runs/1/spec", "/api/runs/1/verdict"} {
+		rec = httptest.NewRecorder()
+		d.Handler().ServeHTTP(rec, httptest.NewRequest("GET", p, nil))
+		if rec.Code != http.StatusTeapot {
+			t.Errorf("%s: status %d, want the run API's", p, rec.Code)
+		}
+	}
+}
+
 func TestHealthzReportsIntegrations(t *testing.T) {
 	d := newServer(&syncBuffer{})
 	d.Integrations = []string{"github_webhook"}

@@ -115,6 +115,20 @@ func nextAttempt(ctx context.Context, tx *sql.Tx, itemID int64, stage string) (i
 	return top + 1, err
 }
 
+// NextAttempt is the attempt InsertRun would give the item's next run at
+// a stage. The launcher builds the prompt, which names the attempt, before
+// it inserts the run; InsertRun decides again in its own transaction, and
+// the launcher refuses a run whose attempt moved in between.
+func (s *Store) NextAttempt(ctx context.Context, itemID int64, stage string) (int, error) {
+	var n int
+	err := s.inTx(ctx, func(tx *sql.Tx) error {
+		var err error
+		n, err = nextAttempt(ctx, tx, itemID, stage)
+		return err
+	})
+	return n, err
+}
+
 // Attempts is how many attempts an item has used at a stage: the
 // DISTINCT attempt numbers over its runs, so a same-attempt relaunch is
 // not counted twice. Build attempts and review rounds are capped on it.
@@ -296,8 +310,26 @@ func (s *Store) LatestVerdict(ctx context.Context, itemID int64, stage string) (
 // OpenRuns returns every launching or running run, oldest first. The
 // watcher resumes these on boot.
 func (s *Store) OpenRuns(ctx context.Context) ([]Run, error) {
-	rows, err := s.db.QueryContext(ctx,
+	return s.queryRuns(ctx,
 		`SELECT `+runCols+` FROM runs WHERE status IN ('launching', 'running') ORDER BY id`)
+}
+
+// RunsForItem returns an item's runs at a stage, oldest first.
+func (s *Store) RunsForItem(ctx context.Context, itemID int64, stage string) ([]Run, error) {
+	return s.queryRuns(ctx, `SELECT `+runCols+` FROM runs WHERE item_id = ? AND stage = ? ORDER BY id`,
+		itemID, stage)
+}
+
+// UndestroyedRuns returns every ended run whose Machine is not yet known
+// to be gone, oldest first. A stopped Machine still bills, so the watcher
+// destroys what auto_destroy left behind.
+func (s *Store) UndestroyedRuns(ctx context.Context) ([]Run, error) {
+	return s.queryRuns(ctx, `SELECT `+runCols+` FROM runs WHERE status NOT IN ('launching', 'running')
+		AND machine_id <> '' AND destroyed_at IS NULL ORDER BY id`)
+}
+
+func (s *Store) queryRuns(ctx context.Context, q string, args ...any) ([]Run, error) {
+	rows, err := s.db.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}
