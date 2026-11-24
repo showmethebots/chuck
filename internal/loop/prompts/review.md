@@ -18,5 +18,7 @@ Run the `pr-review` skill on that PR. It posts one consolidated comment that
 ## Verdict
 
 `posted` with the head SHA you reviewed, the comment URL (its `html_url`, the
-`https://github.com/...#issuecomment-N` link) and the number of findings, or `failed` with what stopped you. List in `skills_not_run` any review
+`https://github.com/...#issuecomment-N` link), `comment_sha256` (the lowercase
+hex sha256 of the comment's `body` exactly as the create-comment call returned
+it, not from a later read) and the number of findings, or `failed` with what stopped you. List in `skills_not_run` any review
 `pr-review` would have routed to that is not vendored here.

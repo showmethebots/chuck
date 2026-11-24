@@ -215,8 +215,21 @@ func (fx *fixture) item(kind string, number int, state string) memory.Item {
 }
 
 // reviewed records a finished review run on a PR item that reported sha,
-// with its findings posted at url.
+// with its findings posted at url, reporting the hash of the comment's
+// body as it is now in fx.api.
 func (fx *fixture) reviewed(it memory.Item, sha, url string) {
+	fx.t.Helper()
+	posted := ""
+	for _, c := range fx.api.issueComments[it.Number] {
+		if c.HTMLURL == url {
+			posted = c.Body
+		}
+	}
+	fx.reviewedAs(it, sha, url, posted)
+}
+
+// reviewedAs is reviewed with the body the review worker says it posted.
+func (fx *fixture) reviewedAs(it memory.Item, sha, url, posted string) {
 	fx.t.Helper()
 	r, err := fx.store.InsertRun(fx.ctx, memory.Run{ItemID: it.ID, Stage: "review", Image: "i", Model: "m",
 		Credential: memory.CredentialAPIKey, Prompt: "p", SchemaName: "review", Ref: "r",
@@ -225,7 +238,7 @@ func (fx *fixture) reviewed(it memory.Item, sha, url string) {
 		fx.t.Fatal(err)
 	}
 	_ = fx.store.MarkRunRunning(fx.ctx, r.ID, fx.now)
-	v := `{"outcome":"posted","summary":"s","reviewed_sha":"` + sha + `","comment_url":"` + url + `","findings_count":1,"skills_not_run":[]}`
+	v := `{"outcome":"posted","summary":"s","reviewed_sha":"` + sha + `","comment_url":"` + url + `","comment_sha256":"` + bodySHA(posted) + `","findings_count":1,"skills_not_run":[]}`
 	// As the run API does on accepting the verdict.
 	rv, err := loop.ParseVerdict(config.StageReview, []byte(v))
 	if err != nil {

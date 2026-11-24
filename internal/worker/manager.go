@@ -396,10 +396,18 @@ func (m *Manager) checkFindings(ctx context.Context, itemID int64, url string, b
 }
 
 // snapshotFindings records the hash of a posted review's findings comment
-// as it stands when chuck accepts the verdict, for checkFindings. It is
+// for checkFindings. The hash is the review worker's: its verdict's
+// comment_sha256, of the body the create-comment call returned. chuck
+// records it only when the comment it reads now, as the App, still hashes
+// to that, so an edit at any time after posting (even inside the second
+// GitHub's timestamps resolve) leaves nothing recorded. It is
 // best-effort: with nothing recorded, the sweep escalates instead.
 func (m *Manager) snapshotFindings(ctx context.Context, run memory.Run, rv *loop.ReviewVerdict) {
 	if rv == nil || rv.CommentURL == "" || m.Repos == nil {
+		return
+	}
+	if rv.CommentSHA256 == "" {
+		m.log().Warn("review findings not recorded; the sweep will escalate", "run", run.ID, "err", "verdict has no comment_sha256")
 		return
 	}
 	err := func() error {
@@ -424,11 +432,15 @@ func (m *Manager) snapshotFindings(ctx context.Context, run memory.Run, rv *loop
 			return err
 		}
 		for _, c := range cs {
-			if c.User.ID == bot && c.HTMLURL == rv.CommentURL && !c.UpdatedAt.After(c.CreatedAt) {
-				return m.Store.InsertReviewFindings(ctx, run.ID, it.ID, c.HTMLURL, bodySHA(c.Body), m.now())
+			if c.User.ID != bot || c.HTMLURL != rv.CommentURL {
+				continue
 			}
+			if c.UpdatedAt.After(c.CreatedAt) || bodySHA(c.Body) != rv.CommentSHA256 {
+				return errors.New("the findings comment was edited after the review posted it")
+			}
+			return m.Store.InsertReviewFindings(ctx, run.ID, it.ID, c.HTMLURL, rv.CommentSHA256, m.now())
 		}
-		return errors.New("no unedited comment of chuck's App at the reported comment_url")
+		return errors.New("no comment of chuck's App at the reported comment_url")
 	}()
 	if err != nil {
 		m.log().Warn("review findings not recorded; the sweep will escalate", "run", run.ID, "err", err.Error())

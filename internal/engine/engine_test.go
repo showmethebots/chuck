@@ -140,7 +140,7 @@ func reviewRun(t *testing.T, fx *fixture, itemID int64, sha string) {
 	if err := fx.store.MarkRunRunning(fx.ctx, r.ID, fx.now); err != nil {
 		t.Fatal(err)
 	}
-	v := fmt.Sprintf(`{"outcome":"posted","summary":"s","reviewed_sha":%q,"comment_url":"https://x","findings_count":0,"skills_not_run":[]}`, sha)
+	v := fmt.Sprintf(`{"outcome":"posted","summary":"s","reviewed_sha":%q,"comment_url":"https://x","comment_sha256":"","findings_count":0,"skills_not_run":[]}`, sha)
 	if err := fx.store.EndRun(fx.ctx, r.ID, memory.RunEnd{Status: "finished", VerdictJSON: v}, fx.now); err != nil {
 		t.Fatal(err)
 	}

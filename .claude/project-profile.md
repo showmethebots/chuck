@@ -171,9 +171,10 @@ from `humans` and chuck's App, decided by numeric user id in
 `worker.Trusted` before the prompt is built. App text counts only as
 sweep's review findings: the one App comment at the review verdict's
 `comment_url`, when `reviewed_sha` is the head being swept. Any worker's
-token can edit an App comment, so chuck records the comment's sha256 when
-it accepts the review verdict, and a missing, edited or unrecorded
-findings comment escalates the sweep. Build gets no
+token can edit an App comment, so the review verdict reports the sha256
+of the body as posted, chuck records it only if the comment still matches
+when it accepts the verdict, and a missing, edited or unrecorded findings
+comment escalates the sweep. Build gets no
 App text, and every other App comment or review, including chuck's
 mentions, is left out because every worker posts as the App. Everything left out is recorded
 in `ignored_feedback`. The filter governs only the prompt chuck builds: a

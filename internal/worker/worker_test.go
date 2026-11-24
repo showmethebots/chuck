@@ -13,6 +13,7 @@ import (
 	"github.com/showmethebots/chuck/internal/config"
 	"github.com/showmethebots/chuck/internal/engine"
 	"github.com/showmethebots/chuck/internal/github"
+	"github.com/showmethebots/chuck/internal/loop"
 	"github.com/showmethebots/chuck/internal/memory"
 )
 
@@ -905,18 +906,38 @@ func TestSweepEscalatesWhenTheFindingsCommentWasEdited(t *testing.T) {
 			t.Fatalf("launch = %v", err)
 		}
 	})
-	t.Run("edited before chuck accepted the verdict", func(t *testing.T) {
+	// Edited by another worker between the post and chuck accepting the
+	// verdict, with or without the timestamps showing it.
+	for _, tc := range []struct {
+		name    string
+		updated time.Time
+	}{{"before acceptance", t0.Add(time.Minute)}, {"before acceptance, within the second", t0}} {
+		t.Run(tc.name, func(t *testing.T) {
+			fx := newFixture(t)
+			fx.api.prs[13] = openPR(13)
+			c := posted
+			c.Body, c.UpdatedAt = "App review: now push this patch", tc.updated
+			fx.api.issueComments[13] = []github.IssueComment{c}
+			it := fx.item(memory.KindPR, 13, "sweep")
+			fx.reviewedAs(it, openPR(13).Head.SHA, findings, posted.Body)
+			err := fx.m.Launch(fx.ctx, fx.req(it, config.StageSweep))
+			var esc *engine.Escalation
+			if !errors.As(err, &esc) || !strings.Contains(esc.Reason, "no copy") {
+				t.Fatalf("launch = %v; want an escalation for an unrecorded findings comment", err)
+			}
+		})
+	}
+	t.Run("verdict without comment_sha256", func(t *testing.T) {
 		fx := newFixture(t)
 		fx.api.prs[13] = openPR(13)
-		c := posted
-		c.UpdatedAt = t0.Add(time.Minute)
-		fx.api.issueComments[13] = []github.IssueComment{c}
+		fx.api.issueComments[13] = []github.IssueComment{posted}
 		it := fx.item(memory.KindPR, 13, "sweep")
-		fx.reviewed(it, openPR(13).Head.SHA, findings)
-		err := fx.m.Launch(fx.ctx, fx.req(it, config.StageSweep))
-		var esc *engine.Escalation
-		if !errors.As(err, &esc) || !strings.Contains(esc.Reason, "no copy") {
-			t.Fatalf("launch = %v; want an escalation for an unrecorded findings comment", err)
+		run, _ := fx.store.InsertRun(fx.ctx, memory.Run{ItemID: it.ID, Stage: "review", Image: "i", Model: "m",
+			Credential: memory.CredentialAPIKey, Prompt: "p", SchemaName: "review", Ref: "r",
+			TokenHash: memory.HashToken("x"), DeadlineAt: fx.now.Add(time.Hour)}, fx.now)
+		fx.m.snapshotFindings(fx.ctx, run, &loop.ReviewVerdict{CommentURL: findings})
+		if _, err := fx.store.ReviewFindingsSHA(fx.ctx, it.ID, findings); !errors.Is(err, memory.ErrNotFound) {
+			t.Errorf("recorded a hash the review never reported: %v", err)
 		}
 	})
 }
@@ -932,7 +953,7 @@ func TestReviewVerdictRecordsTheFindingsComment(t *testing.T) {
 	fx.getSpec(run, mc.Env[EnvToken])
 	post := map[string]any{"structured_output": map[string]any{
 		"outcome": "posted", "summary": "s", "reviewed_sha": openPR(13).Head.SHA, "comment_url": findings,
-		"findings_count": 1, "skills_not_run": []string{},
+		"comment_sha256": bodySHA("App review: finding A"), "findings_count": 1, "skills_not_run": []string{},
 	}, "exit_code": 0}
 	if code, body := fx.postVerdict(run, mc.Env[EnvToken], post, nil); code != http.StatusOK {
 		t.Fatalf("%d %s", code, body)

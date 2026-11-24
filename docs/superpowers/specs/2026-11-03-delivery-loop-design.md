@@ -476,10 +476,14 @@ prompt never sees the rest:
   run posted its findings in: the App's comment at the review verdict's
   `comment_url`, when `reviewed_sha` is the head being swept. Every other
   App comment is left out, since every worker posts as the App, and build
-  gets no App text. When chuck accepts the review verdict it records the
-  sha256 of that comment's body (`review_findings`), and sweep uses the
-  comment only while its body still hashes to that, since every worker's
-  token can edit any App comment. If the comment is missing, was edited,
+  gets no App text. The review verdict carries `comment_sha256`, the
+  hash of the body its create-comment call returned. chuck records it
+  (`review_findings`) only if the comment, read as the App when the
+  verdict is accepted, still hashes to that, and sweep uses the comment
+  only while it still does, since every worker's token can edit any App
+  comment. Anchoring the hash to the post, not to a later read, catches
+  an edit at any time, including one inside the second GitHub's
+  timestamps resolve. If the comment is missing, was edited,
   or was never recorded, the sweep escalates instead of running, since a
   sweep without the real findings would report the PR ready. Everything else is omitted from the prompt and
   listed on the item page as "ignored feedback" with the author.
