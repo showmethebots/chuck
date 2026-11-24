@@ -3,11 +3,34 @@ package worker
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
+	"github.com/showmethebots/chuck/internal/engine"
 	"github.com/showmethebots/chuck/internal/loop"
 	"github.com/showmethebots/chuck/internal/memory"
 )
+
+// MaxStartFailures is how many runs of one attempt may end without their
+// Machine ever starting before the item goes to a human. It matches the
+// executor's engine.EscalateAfter for a launch that fails outright.
+const MaxStartFailures = engine.EscalateAfter
+
+// neverStarted counts the earlier runs of run's attempt that ended without
+// starting: failed launches and Machines that never fetched their spec.
+func (m *Manager) neverStarted(ctx context.Context, run memory.Run) (int, error) {
+	runs, err := m.Store.RunsForItem(ctx, run.ItemID, run.Stage)
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, r := range runs {
+		if r.ID != run.ID && r.Attempt == run.Attempt && r.Status == memory.RunFailed && r.StartedAt.IsZero() {
+			n++
+		}
+	}
+	return n, nil
+}
 
 func orDefault(d, def time.Duration) time.Duration {
 	if d > 0 {
@@ -51,6 +74,7 @@ func (m *Manager) WatchOnce(ctx context.Context) {
 		m.check(ctx, run, now)
 	}
 	m.sweepMachines(ctx, now)
+	m.revokeEnded(ctx)
 }
 
 func (m *Manager) check(ctx context.Context, run memory.Run, now time.Time) {
@@ -73,8 +97,19 @@ func (m *Manager) check(ctx context.Context, run memory.Run, now time.Time) {
 		if !alive && run.MachineID == "" && now.Sub(run.CreatedAt) < orDefault(m.StartTimeout, 10*time.Minute) {
 			return // Launch is still creating it
 		}
-		m.end(ctx, run, loop.VerdictInput{Err: "machine never started", SameAttempt: true},
-			memory.RunEnd{Status: memory.RunFailed, Reason: "machine_never_started"})
+		v := loop.VerdictInput{Err: "machine never started", SameAttempt: true}
+		n, err := m.neverStarted(ctx, run)
+		if err != nil {
+			m.log().Error("watcher: count failed starts", "run", run.ID, "err", err.Error())
+			return
+		}
+		if n+1 >= MaxStartFailures {
+			// A worker that dies before its first spec fetch (a broken
+			// image, chuck unreachable from the workers app) would
+			// otherwise relaunch every pass forever.
+			v = loop.VerdictInput{Err: fmt.Sprintf("machine never started, %d times running", n+1), Escalate: true}
+		}
+		m.end(ctx, run, v, memory.RunEnd{Status: memory.RunFailed, Reason: "machine_never_started"})
 	case memory.RunRunning:
 		switch {
 		case !alive:

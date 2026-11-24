@@ -7,8 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/showmethebots/chuck/internal/config"
@@ -57,6 +59,13 @@ type Manager struct {
 	// ExitGrace is how long a Machine may outlive its verdict before the
 	// watcher destroys it: 2 m.
 	ExitGrace time.Duration
+
+	// Revoke revokes a GitHub token a run was given; nil means
+	// github.RevokeToken against api.github.com.
+	Revoke func(ctx context.Context, token string) error
+
+	mu     sync.Mutex
+	minted map[int64][]string // run id → GitHub tokens served, until the run ends
 }
 
 var _ engine.Launcher = (*Manager)(nil)
@@ -172,6 +181,7 @@ func (m *Manager) Destroy(ctx context.Context, runID int64) error {
 }
 
 func (m *Manager) destroy(ctx context.Context, run memory.Run) error {
+	m.revoke(ctx, run.ID)
 	if run.MachineID == "" || !run.DestroyedAt.IsZero() {
 		return nil
 	}
@@ -182,6 +192,67 @@ func (m *Manager) destroy(ctx context.Context, run memory.Run) error {
 		return err
 	}
 	return nil
+}
+
+// remember keeps a GitHub token served to a run so it can be revoked when
+// the run ends. It lives in memory only: a restart forgets it, and such a
+// token lives out GitHub's one-hour TTL.
+func (m *Manager) remember(runID int64, token string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.minted == nil {
+		m.minted = map[int64][]string{}
+	}
+	m.minted[runID] = append(m.minted[runID], token)
+}
+
+// revoke revokes every GitHub token served to a run that has ended, so a
+// token a worker leaked stops working with its run, not an hour later. A
+// token whose revocation fails stays listed for the watcher's next pass.
+func (m *Manager) revoke(ctx context.Context, runID int64) {
+	m.mu.Lock()
+	tokens := m.minted[runID]
+	delete(m.minted, runID)
+	m.mu.Unlock()
+	rev := m.Revoke
+	if rev == nil {
+		rev = func(ctx context.Context, t string) error {
+			return github.RevokeToken(ctx, &http.Client{Timeout: 30 * time.Second}, "", t)
+		}
+	}
+	var keep []string
+	for _, t := range tokens {
+		if err := rev(ctx, t); err != nil {
+			m.log().Warn("revoke worker token", "run", runID, "err", err.Error())
+			keep = append(keep, t)
+		}
+	}
+	if len(keep) > 0 {
+		m.mu.Lock()
+		if m.minted == nil {
+			m.minted = map[int64][]string{}
+		}
+		m.minted[runID] = append(m.minted[runID], keep...)
+		m.mu.Unlock()
+	}
+}
+
+// revokeEnded revokes the tokens of every run that is no longer open,
+// whichever path ended it: a verdict, the watcher, a cancel, an escalation.
+func (m *Manager) revokeEnded(ctx context.Context) {
+	m.mu.Lock()
+	ids := make([]int64, 0, len(m.minted))
+	for id := range m.minted {
+		ids = append(ids, id)
+	}
+	m.mu.Unlock()
+	for _, id := range ids {
+		r, err := m.Store.RunByID(ctx, id)
+		if err != nil || r.Status == memory.RunLaunching || r.Status == memory.RunRunning {
+			continue
+		}
+		m.revoke(ctx, id)
+	}
 }
 
 // checkSpend refuses a launch once the month's spend reaches either cap.
@@ -270,9 +341,32 @@ func (m *Manager) prepare(ctx context.Context, req engine.LaunchRequest, attempt
 		if err != nil {
 			return p, fmt.Errorf("read feedback: %w", err)
 		}
-		p.context.Feedback, p.ignored = Trusted(cs, req.Humans, req.BotID)
+		reviewed := ""
+		if req.Stage == config.StageSweep {
+			if reviewed, err = m.reviewedSHA(ctx, it.ID); err != nil {
+				return p, err
+			}
+		}
+		p.context.Feedback, p.ignored = Trusted(cs, req.Humans, req.BotID, reviewed)
 	}
 	return p, nil
+}
+
+// reviewedSHA is the head the item's last review verdict reported, or ""
+// if it has none.
+func (m *Manager) reviewedSHA(ctx context.Context, itemID int64) (string, error) {
+	v, err := m.Store.LatestVerdict(ctx, itemID, string(config.StageReview))
+	if errors.Is(err, memory.ErrNotFound) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	rv, err := loop.ParseVerdict(config.StageReview, []byte(v))
+	if err != nil {
+		return "", fmt.Errorf("stored review verdict: %w", err)
+	}
+	return rv.Review.ReviewedSHA, nil
 }
 
 // earlierAttempts is what each earlier build attempt reported, from its

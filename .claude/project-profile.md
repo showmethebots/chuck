@@ -168,8 +168,14 @@ tick replays, from GitHub's own event and review records), and reads
 quote a worker's words, so it defuses `@` mentions and escapes the
 hidden-marker opener in them. Feedback reaches a build or sweep prompt only
 from `humans` and chuck's App, decided by numeric user id in
-`worker.Trusted` before the prompt is built; chuck's own mention comments
-are left out too, and everything else is recorded in `ignored_feedback`.
+`worker.Trusted` before the prompt is built. App comments count only as
+sweep's review findings on the reviewed head (reviews and inline
+comments); the App's issue comments, including chuck's mentions, are left
+out because a worker can post as the App. Everything left out is recorded
+in `ignored_feedback`. The filter governs only the prompt chuck builds: a
+worker can still read any comment itself with its token or the public
+API, so the controls behind it are the fresh review of the head, the
+risk-path hold and the worker's egress limits (#29).
 
 Workers are the second inbound path. `/api/runs/{id}/spec`, `/token` and
 `/verdict` are public routes authenticated only by the run's own token (32
@@ -181,7 +187,14 @@ against the stage schema again (a failure escalates), its evidence tar is
 capped at 20 MB with paths cleaned, and its GitHub token is minted per call
 from `github.StagePermissions` (never `statuses`, read-only for validate).
 chuck's outbound calls gain Fly's Machines API, with an API token scoped to
-the workers app (`FLY_WORKERS_API_TOKEN`), which never reaches a worker.
+the workers app (`FLY_WORKERS_API_TOKEN`), which never reaches a worker. Workers run
+model-driven code, so `chuck-workers` lives on its own Fly network, not
+the organization's default one: on the default network a worker could
+reach chuck directly, skipping the proxy and `Fly-Client-IP`, and every
+other app in the organization over its private address (#34 creates the
+app with `--network`). Worker GitHub tokens are revoked when their run
+ends; one minted before a chuck restart is not, and lives out GitHub's
+one-hour TTL.
 
 The loop is on only when every `${VAR}` in `config/chuck.yaml` resolves;
 until then deliveries are stored as handled and nothing acts on them. The loop's own model (GitHub App tokens scoped
@@ -266,6 +279,10 @@ which `make deploy` sends to Fly's remote builder.
 
 ## Known gaps
 
+- **open:** `chuck-workers` must be created on its own Fly network
+  (`fly apps create chuck-workers --network <name>`), so workers cannot
+  reach chuck or other apps over the organization's private network. A
+  #34 human step; until then no worker runs.
 - **open:** Docker base images (`Dockerfile`, `deploy/worker.Dockerfile`) use
   mutable tags, not digests. This was recorded when the Phase 0 scaffold was
   committed.

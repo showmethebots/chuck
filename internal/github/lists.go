@@ -129,11 +129,12 @@ func (c *Client) Reviews(ctx context.Context, number int) ([]Review, error) {
 // ReviewComment is one inline comment on a PR's diff, with its author for
 // the trusted-text filter.
 type ReviewComment struct {
-	ID      int64  `json:"id"`
-	HTMLURL string `json:"html_url"`
-	Body    string `json:"body"`
-	Path    string `json:"path"`
-	User    User   `json:"user"`
+	ID       int64  `json:"id"`
+	HTMLURL  string `json:"html_url"`
+	Body     string `json:"body"`
+	Path     string `json:"path"`
+	CommitID string `json:"commit_id"`
+	User     User   `json:"user"`
 }
 
 // ReviewComments lists a PR's inline review comments, oldest first.

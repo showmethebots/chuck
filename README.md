@@ -15,9 +15,9 @@ and a person approves anything risky.**
 > **Status: under construction.** The design is settled and the core is
 > built and tested: config, state store, the transition engine, stage
 > prompts and verdict schemas, the GitHub client with a hardened webhook
-> receiver, and the executor and tick that drive it. The pieces that make
-> it run end to end (worker launcher, Claude proxy and dashboard) are
-> still being built, so chuck does not yet move real issues. Progress is
+> receiver, the executor and tick that drive it, and the worker launcher
+> with its run API and watcher. The pieces that make it run end to end
+> (Claude proxy, worker entrypoint and dashboard) are still being built, so chuck does not yet move real issues. Progress is
 > tracked on [issue #17](https://github.com/showmethebots/chuck/issues/17).
 > Production today serves `/healthz` and stores signed GitHub webhook
 > deliveries; the loop stays off until its secrets are set.
@@ -102,7 +102,8 @@ internal/loop/      the pure Transition function, stage prompts and verdict sche
 internal/engine/    the I/O around Transition: webhook mapping, facts, the effect executor, the tick
 internal/github/    GitHub App client, worker tokens, webhook receiver and IP allowlist
 internal/memory/    SQLite state (WAL, embedded migrations)
-internal/web/       HTTP server: /healthz, the webhook mount, heartbeat
+internal/web/       HTTP server: /healthz, the webhook mount, the worker run API, heartbeat
+internal/worker/    stage workers: launchers, run API, watcher, trusted text
 config/             chuck.yaml (chuck-wide, changed by PR) and loop.schema.json (for consumers)
 deploy/             fly.toml, Litestream config, entrypoint, worker image, restore check
 docs/               human steps, specs and plans

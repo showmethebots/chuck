@@ -268,6 +268,7 @@ func (m *Manager) serveToken(w http.ResponseWriter, r *http.Request) {
 		refuse(w, http.StatusInternalServerError, "token carries statuses")
 		return
 	}
+	m.remember(run.ID, t.Value)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"token": t.Value, "expires_at": t.ExpiresAt, "permissions": t.Permissions,
 	})
@@ -333,6 +334,7 @@ func (m *Manager) serveVerdict(w http.ResponseWriter, r *http.Request) {
 		refuse(w, http.StatusServiceUnavailable, "could not apply the verdict; retry")
 		return
 	}
+	m.revoke(ctx, run.ID)
 	if len(files) > 0 {
 		if err := m.Store.InsertEvidence(ctx, run.ID, files, m.now()); err != nil {
 			m.log().Error("store evidence", "run", run.ID, "err", err.Error())

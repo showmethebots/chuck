@@ -124,6 +124,17 @@ type fixture struct {
 	cfg    *config.Loop
 	now    time.Time
 	env    map[string]string
+
+	revMu   sync.Mutex
+	revoked []string
+	revErr  error
+}
+
+// revokedTokens is every GitHub token the Manager revoked, in order.
+func (fx *fixture) revokedTokens() []string {
+	fx.revMu.Lock()
+	defer fx.revMu.Unlock()
+	return append([]string(nil), fx.revoked...)
 }
 
 func newFixture(t *testing.T) *fixture {
@@ -145,6 +156,16 @@ func newFixture(t *testing.T) *fixture {
 		WallClockCeiling: 4 * time.Hour, Spend: config.Spend{MonthlyUSD: 100, PerRepoMonthlyUSD: 60},
 		Getenv: func(k string) string { return fx.env[k] },
 		Log:    slog.New(slog.DiscardHandler), Now: clock}
+	// Never reach api.github.com from a test.
+	fx.m.Revoke = func(_ context.Context, tok string) error {
+		fx.revMu.Lock()
+		defer fx.revMu.Unlock()
+		if fx.revErr != nil {
+			return fx.revErr
+		}
+		fx.revoked = append(fx.revoked, tok)
+		return nil
+	}
 	fx.srv = httptest.NewServer(fx.m.Handler())
 	t.Cleanup(fx.srv.Close)
 
@@ -184,6 +205,22 @@ func (fx *fixture) item(kind string, number int, state string) memory.Item {
 		fx.t.Fatal(err)
 	}
 	return it
+}
+
+// reviewed records a finished review run on a PR item that reported sha.
+func (fx *fixture) reviewed(it memory.Item, sha string) {
+	fx.t.Helper()
+	r, err := fx.store.InsertRun(fx.ctx, memory.Run{ItemID: it.ID, Stage: "review", Image: "i", Model: "m",
+		Credential: memory.CredentialAPIKey, Prompt: "p", SchemaName: "review", Ref: "r",
+		TokenHash: memory.HashToken(fmt.Sprint("review-", it.ID)), DeadlineAt: fx.now.Add(time.Hour)}, fx.now)
+	if err != nil {
+		fx.t.Fatal(err)
+	}
+	_ = fx.store.MarkRunRunning(fx.ctx, r.ID, fx.now)
+	v := `{"outcome":"posted","summary":"s","reviewed_sha":"` + sha + `","comment_url":"https://x","findings_count":1,"skills_not_run":[]}`
+	if err := fx.store.EndRun(fx.ctx, r.ID, memory.RunEnd{Status: memory.RunFinished, VerdictJSON: v}, fx.now); err != nil {
+		fx.t.Fatal(err)
+	}
 }
 
 func (fx *fixture) req(it memory.Item, stage config.Stage) engine.LaunchRequest {
