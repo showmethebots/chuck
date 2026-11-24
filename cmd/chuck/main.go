@@ -304,7 +304,7 @@ func publicURL(v string) (string, error) {
 	}
 	host := u.Hostname()
 	local := host == "localhost" || host == "127.0.0.1" || host == "::1"
-	if u.Scheme != "https" && !(u.Scheme == "http" && local) {
+	if u.Scheme != "https" && (u.Scheme != "http" || !local) {
 		return "", fmt.Errorf("CHUCK_PUBLIC_URL: want https (http only on localhost), got %q", v)
 	}
 	return strings.TrimRight(u.String(), "/"), nil
