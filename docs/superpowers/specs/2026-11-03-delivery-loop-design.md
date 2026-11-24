@@ -420,8 +420,16 @@ cap the item goes to `needs-human` with reason "budget".
 
 ### Back in chuck
 
+- A run is `launching` until its worker first fetches its spec, which is
+  the proof the Machine started; the token and verdict endpoints refuse a
+  run that is not yet `running`. A Machine that has not fetched its spec
+  ten minutes after launch failed to start.
 - The verdict endpoint accepts one post per run, only while `running`,
-  only with the matching token hash. It validates against the stage
+  only with the matching token hash. The post is `multipart/form-data`: a
+  `verdict` JSON part first (structured output or the worker's own error,
+  exit code, duration, log tail), then for validate an optional
+  `evidence` tar. A post after the run ended gets 409, which tells the
+  worker's retry loop to stop. It validates against the stage
   schema again. Then it feeds a `Verdict` input to the loop.
 - A watcher polls the Machines API every 30 s for `running` rows. Machine
   gone without a verdict → `failed`, `error` verdict. Ten minutes past

@@ -23,8 +23,8 @@ import (
 	"github.com/showmethebots/chuck/internal/memory"
 )
 
-// Launcher starts and stops stage workers. It lands with #27; until then
-// the engine has none, and a launch effect fails with the reason on its
+// Launcher starts and stops stage workers; internal/worker implements it.
+// An engine without one fails every launch effect with the reason on its
 // transition row.
 type Launcher interface {
 	// Launch starts a worker for the item's stage. It records the run, so
@@ -34,13 +34,27 @@ type Launcher interface {
 	Destroy(ctx context.Context, runID int64) error
 }
 
-// LaunchRequest is one launch effect.
+// LaunchRequest is one launch effect, with what the launcher needs to build
+// the stage's prompt: the repo's client, to read the feedback that counts,
+// and who counts.
 type LaunchRequest struct {
 	Repo   memory.Repo
 	Config *config.Loop
 	Item   memory.Item
 	Stage  config.Stage
+	API    RepoAPI
+	// BotID is chuck's App's bot user; Humans are config/chuck.yaml's
+	// humans. Feedback from anyone else never reaches a prompt.
+	BotID  int64
+	Humans []int64
 }
+
+// Escalation is an error a Launcher returns when the launch must not be
+// retried and a human has to act, such as the spend cap. The launch effect
+// is abandoned and the item goes to needs-human with Reason.
+type Escalation struct{ Reason string }
+
+func (e *Escalation) Error() string { return e.Reason }
 
 // Ratchet opens the e2e coverage issue for an item that reached done. It
 // lands with #32.
@@ -59,7 +73,7 @@ const EscalateAfter = 3
 type Engine struct {
 	Store    *memory.Store
 	GitHub   Source
-	Launcher Launcher // nil until #27
+	Launcher Launcher // nil: launches fail on their rows until one is configured
 	Ratchet  Ratchet  // nil until #32
 	Humans   []int64
 	// Tick is config/chuck.yaml's tick; Retention its webhook_retention.

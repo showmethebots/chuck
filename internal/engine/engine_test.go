@@ -166,6 +166,30 @@ func sweepReady() *loop.Verdict {
 }
 
 // Issue #26: "merge not retried when the head moved".
+func TestLauncherEscalationGoesStraightToAHuman(t *testing.T) {
+	fx := newFixture(t)
+	fx.discover()
+	fx.lnch.err = &Escalation{Reason: "budget: $100.00 spent this month, at the $100.00 cap"}
+	fx.deliver("issues", "labeled", labeled(12, loop.LabelIntake, human))
+	it := fx.item("issue", 12)
+	if it.State != "needs-human" || it.EscalatedFrom != "intake" {
+		t.Fatalf("state %q from %q; want needs-human from intake without waiting for ticks", it.State, it.EscalatedFrom)
+	}
+	trs, _ := fx.store.Transitions(fx.ctx, it.ID)
+	if last := trs[len(trs)-1]; !strings.HasPrefix(last.Reason, "budget") {
+		t.Errorf("reason %q", last.Reason)
+	}
+	rs, _ := decodeRecords(trs[len(trs)-2].Effects)
+	if got := statuses(rs); got != "state_label=ok launch=abandoned" {
+		t.Errorf("the launch row: %s", got)
+	}
+	fx.lnch.err = nil
+	fx.tick()
+	if len(fx.lnch.launched) != 0 {
+		t.Errorf("an abandoned launch was retried: %v", fx.lnch.launched)
+	}
+}
+
 func TestMergeNotRetriedWhenHeadMoved(t *testing.T) {
 	fx := newFixture(t)
 	fx.discover()

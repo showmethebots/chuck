@@ -446,7 +446,7 @@ func (t *txn) verdict(v VerdictInput) {
 
 func (t *txn) stageError(v VerdictInput) {
 	it := t.item
-	if v.Stage == config.StageBuild {
+	if v.Stage == config.StageBuild && !v.Escalate {
 		used, limit := t.f.Attempts[config.StageBuild], t.cfg.Limits.BuildAttempts
 		if used < limit {
 			t.move(it, StateReady, fmt.Sprintf("build attempt %d of %d failed: %s", used, limit, v.Err), false)

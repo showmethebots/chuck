@@ -56,7 +56,12 @@ func TestSubIssuesReviewsEventsRuns(t *testing.T) {
 		`{"workflow_runs":[{"id":4,"path":".github/workflows/deploy-prod.yml","display_title":"Deploy abc","event":"workflow_dispatch","created_at":"2026-11-20T12:01:00Z"}]}`)
 	f.ok("GET /repos/showmethebots/demos/issues?state=open&labels=loop%3Aintake&per_page=100&page=1", `[{"number":12}]`)
 	f.ok("GET /user/5", `{"id":5,"login":"h","type":"User"}`)
+	f.ok("GET /repos/showmethebots/demos/pulls/13/comments?per_page=100&page=1",
+		`[{"id":2,"user":{"id":5,"login":"h"},"body":"fix this","path":"a.go","html_url":"https://x/c2"}]`)
 
+	if cs, err := c.ReviewComments(ctx, 13); err != nil || len(cs) != 1 || cs[0].Body != "fix this" || cs[0].User.ID != 5 || cs[0].HTMLURL != "https://x/c2" {
+		t.Errorf("ReviewComments = %+v, %v", cs, err)
+	}
 	if subs, err := c.SubIssues(ctx, 12); err != nil || fmt.Sprint(subs) != "[14 15]" {
 		t.Errorf("SubIssues = %v, %v", subs, err)
 	}

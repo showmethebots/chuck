@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/showmethebots/chuck/internal/config"
 	"github.com/showmethebots/chuck/internal/github"
 	"github.com/showmethebots/chuck/internal/memory"
 )
@@ -22,6 +23,7 @@ type RepoAPI interface {
 	PullRequest(ctx context.Context, number int) (github.PR, error)
 	PRFiles(ctx context.Context, number int) ([]github.File, error)
 	Reviews(ctx context.Context, number int) ([]github.Review, error)
+	ReviewComments(ctx context.Context, number int) ([]github.ReviewComment, error)
 	CheckRuns(ctx context.Context, sha string) ([]github.CheckRun, error)
 	Statuses(ctx context.Context, sha string) ([]github.Status, error)
 	WorkflowRuns(ctx context.Context, headSHA string) ([]github.WorkflowRun, error)
@@ -116,6 +118,16 @@ func (s *AppSource) Repo(r memory.Repo) (RepoAPI, error) {
 		return nil, err
 	}
 	return &github.Client{App: a, InstallationID: r.InstallationID, Owner: r.Owner, Repo: r.Name}, nil
+}
+
+// WorkerToken mints a worker run's token as the App that reaches the repo:
+// the one repository and the stage's permission set, never `statuses`.
+func (s *AppSource) WorkerToken(ctx context.Context, r memory.Repo, stage config.Stage) (github.Token, error) {
+	a, err := s.app(r.AppOwner)
+	if err != nil {
+		return github.Token{}, err
+	}
+	return a.WorkerToken(ctx, r.InstallationID, r.Name, stage)
 }
 
 func (s *AppSource) BotID(ctx context.Context, owner string) (int64, error) {

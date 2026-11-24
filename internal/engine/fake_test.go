@@ -240,6 +240,13 @@ func (f *fakeGitHub) Reviews(_ context.Context, n int) ([]github.Review, error) 
 	return f.reviews[n], nil
 }
 
+func (f *fakeGitHub) ReviewComments(_ context.Context, n int) ([]github.ReviewComment, error) {
+	if err := f.enter("ReviewComments"); err != nil {
+		return nil, err
+	}
+	return nil, nil
+}
+
 func (f *fakeGitHub) CheckRuns(_ context.Context, sha string) ([]github.CheckRun, error) {
 	if err := f.enter("CheckRuns"); err != nil {
 		return nil, err

@@ -166,8 +166,22 @@ in `humans` (by numeric id, from the signed payload or, for a delivery the
 tick replays, from GitHub's own event and review records), and reads
 `chuck/loop` only from statuses chuck's App set. Comments chuck posts can
 quote a worker's words, so it defuses `@` mentions and escapes the
-hidden-marker opener in them. Prompt text is filtered in #27 (the spec's
-"Trusted text").
+hidden-marker opener in them. Feedback reaches a build or sweep prompt only
+from `humans` and chuck's App, decided by numeric user id in
+`worker.Trusted` before the prompt is built; chuck's own mention comments
+are left out too, and everything else is recorded in `ignored_feedback`.
+
+Workers are the second inbound path. `/api/runs/{id}/spec`, `/token` and
+`/verdict` are public routes authenticated only by the run's own token (32
+random bytes, stored as its sha256), checked against the run in the path,
+and refused once the run has ended; a worker's Machine is given that token
+and `CHUCK_URL`/`CHUCK_RUN_ID`, nothing else. A worker is untrusted: it
+runs a model over a public repo's text, so what it posts is validated
+against the stage schema again (a failure escalates), its evidence tar is
+capped at 20 MB with paths cleaned, and its GitHub token is minted per call
+from `github.StagePermissions` (never `statuses`, read-only for validate).
+chuck's outbound calls gain Fly's Machines API, with an API token scoped to
+the workers app (`FLY_WORKERS_API_TOKEN`), which never reaches a worker.
 
 The loop is on only when every `${VAR}` in `config/chuck.yaml` resolves;
 until then deliveries are stored as handled and nothing acts on them. The loop's own model (GitHub App tokens scoped
@@ -187,6 +201,7 @@ in the spec's "Identities", "Who can merge", "The Claude proxy" and
 | `internal/memory/**` | client-data |
 | `internal/loop/**` | authorization, client-data |
 | `internal/engine/**` | authorization, client-data, secrets |
+| `internal/worker/**` | auth-session, authorization, client-data, secrets |
 | `cmd/**` | secrets, client-data |
 | `deploy/**` | auth-session, secrets, supply-chain |
 | `Dockerfile` | supply-chain, secrets |
@@ -233,7 +248,10 @@ set` and which is kept for the loop's Claude proxy. With the loop off, chuck
 reads only the webhook secret; turning it on means setting every
 reference in `config/chuck.yaml`. The Slack secrets are unset by
 `docs/phase-1-human-steps.md` section 2. The loop's new secrets are listed
-in the delivery loop spec's "Rollout / Phase 0"; their setup steps will
+in the delivery loop spec's "Rollout / Phase 0", plus the workers'
+`FLY_WORKERS_API_TOKEN` and each repo's validate credentials in
+`LOOP_ENV_<OWNER>_<REPO>` (served only in a validate run's spec, never in a
+Machine's config); their setup steps will
 live in `docs/phase-0-human-steps.md`, which issue #34 writes and which does
 not exist yet. `config/chuck.yaml` names secrets only as
 `${VAR}` references, which `internal/config` enforces. `deploy/fly.toml` `[env]`, `Dockerfile` `ENV` and `config/`

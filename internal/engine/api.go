@@ -12,7 +12,7 @@ import (
 
 // Verdict applies a run's verdict, or chuck's own error for a run that
 // produced none, and ends the run in the same commit as the changes it
-// causes. The run API (#27) and the watcher call it. A run that has
+// causes. internal/worker's run API and watcher call it. A run that has
 // already ended returns memory.ErrStale and changes nothing, so a second
 // or late post cannot move the item.
 func (e *Engine) Verdict(ctx context.Context, v loop.VerdictInput, end memory.RunEnd) (loop.Result, error) {

@@ -496,3 +496,48 @@ func TestLoopEnumsAreChecked(t *testing.T) {
 		}
 	}
 }
+
+func TestRunQueriesAndIgnoredFeedback(t *testing.T) {
+	ctx := context.Background()
+	s := newStore(t)
+	item := seedIssue(t, s, seedRepo(t, s), 1, "building")
+	if n, err := s.NextAttempt(ctx, item, "build"); err != nil || n != 1 {
+		t.Fatalf("NextAttempt on a fresh item = %d, %v", n, err)
+	}
+	r1, _ := s.InsertRun(ctx, newRun(item, "build", "a"), t0)
+	if err := s.SetRunMachine(ctx, r1.ID, "m1", "iad"); err != nil {
+		t.Fatal(err)
+	}
+	_ = s.MarkRunRunning(ctx, r1.ID, t0)
+	if err := s.InsertIgnoredFeedback(ctx, r1.ID, []IgnoredFeedback{
+		{AuthorID: 666, AuthorLogin: "mallory", URL: "u1", Reason: "untrusted_author"},
+	}, t0); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.EndRun(ctx, r1.ID, RunEnd{Status: RunFinished}, t0); err != nil {
+		t.Fatal(err)
+	}
+	if n, _ := s.NextAttempt(ctx, item, "build"); n != 2 {
+		t.Errorf("NextAttempt after a run that started = %d, want 2", n)
+	}
+	r2, _ := s.InsertRun(ctx, newRun(item, "build", "b"), t0)
+	runs, err := s.RunsForItem(ctx, item, "build")
+	if err != nil || len(runs) != 2 || runs[0].ID != r1.ID || runs[1].ID != r2.ID {
+		t.Errorf("RunsForItem = %v, %v", runs, err)
+	}
+	und, err := s.UndestroyedRuns(ctx)
+	if err != nil || len(und) != 1 || und[0].ID != r1.ID {
+		t.Errorf("UndestroyedRuns = %v, %v; want the ended run with a machine only", und, err)
+	}
+	_ = s.MarkRunDestroyed(ctx, r1.ID, t0)
+	if und, _ := s.UndestroyedRuns(ctx); len(und) != 0 {
+		t.Errorf("a destroyed run is still listed")
+	}
+	ig, err := s.IgnoredFeedbackForItem(ctx, item)
+	if err != nil || len(ig) != 1 || ig[0].AuthorLogin != "mallory" || ig[0].RunID != r1.ID || ig[0].Reason != "untrusted_author" {
+		t.Errorf("IgnoredFeedbackForItem = %+v, %v", ig, err)
+	}
+	if err := s.InsertIgnoredFeedback(ctx, r2.ID, []IgnoredFeedback{{AuthorID: 1, URL: "u"}}, t0); err == nil {
+		t.Error("a row without a reason was stored")
+	}
+}

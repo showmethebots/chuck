@@ -123,15 +123,21 @@ func (e *Engine) run(ctx context.Context, rc *repoCtx, ef loop.Effect, transitio
 			return failed(err)
 		}
 		if e.Launcher == nil {
-			return failed(errors.New("no worker launcher in this build (#27)"))
+			return failed(errors.New("no worker launcher is configured"))
 		}
-		if err := e.Launcher.Launch(ctx, LaunchRequest{Repo: rc.row, Config: rc.cfg, Item: it, Stage: ef.Stage}); err != nil {
+		err = e.Launcher.Launch(ctx, LaunchRequest{Repo: rc.row, Config: rc.cfg, Item: it, Stage: ef.Stage,
+			API: rc.api, BotID: rc.bot, Humans: e.Humans})
+		var esc *Escalation
+		if errors.As(err, &esc) {
+			return outcome{status: statusAbandoned, detail: esc.Reason, escalate: esc.Reason}
+		}
+		if err != nil {
 			return failed(err)
 		}
 		return ok("launched " + string(ef.Stage))
 	case loop.EffectDestroyMachine:
 		if e.Launcher == nil {
-			return failed(errors.New("no worker launcher in this build (#27)"))
+			return failed(errors.New("no worker launcher is configured"))
 		}
 		if err := e.Launcher.Destroy(ctx, ef.RunID); err != nil {
 			return failed(err)
