@@ -15,6 +15,14 @@ Risk-path globs in `loop.json` are matched from the repo root
 `.claude/**` and `.github/**` are risk paths in every repo whatever the
 file lists.
 
+chuck turns the loop on only when every `${VAR}` in `chuck.yaml` resolves,
+the OAuth ones included; until then it serves `/healthz`, stores webhook
+deliveries as handled, and acts on none of them. Each tick it reads every
+installed repo's `loop.json` from the default branch: a repo is in the
+loop exactly when that file exists, is valid, and names the repo's real
+default branch. Deleting the file is how to take a repo out; there is no
+off switch that a later tick would not undo.
+
 Check everything with `make validate`, or a consumer's file with
 `go run ./cmd/chuck validate path/to/loop.json`.
 

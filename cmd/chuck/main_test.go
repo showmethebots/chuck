@@ -3,10 +3,16 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/pem"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func env(m map[string]string) func(string) string {
@@ -128,5 +134,46 @@ func TestIntegrations(t *testing.T) {
 	}
 	if got := strings.Join(integrations("s"), ","); got != "github_webhook" {
 		t.Fatalf("with secret: %s", got)
+	}
+}
+
+func TestLoopTurnsOnOnlyWhenEveryReferenceResolves(t *testing.T) {
+	c, err := checkConfigDir("../../config")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var logs bytes.Buffer
+	log := slog.New(slog.NewTextHandler(&logs, nil))
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pemKey := string(pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)}))
+	full := map[string]string{
+		"GITHUB_APP_ID": "123", "GITHUB_APP_PRIVATE_KEY": pemKey,
+		"GITHUB_OAUTH_CLIENT_ID": "Iv1.x", "GITHUB_OAUTH_CLIENT_SECRET": "secret-value",
+		"CHUCK_WORKER_IMAGE": "registry.fly.io/chuck-workers:abc",
+	}
+	for missing := range full {
+		partial := map[string]string{}
+		for k, v := range full {
+			if k != missing {
+				partial[k] = v
+			}
+		}
+		eng, err := newEngine(c, env(partial), nil, log)
+		if err != nil || eng != nil {
+			t.Errorf("without %s: engine %v, err %v; want the loop off", missing, eng != nil, err)
+		}
+	}
+	if strings.Contains(logs.String(), "secret-value") || strings.Contains(logs.String(), "PRIVATE KEY") {
+		t.Errorf("a secret reached the log: %s", logs.String())
+	}
+	eng, err := newEngine(c, env(full), nil, log)
+	if err != nil || eng == nil {
+		t.Fatalf("with everything set: %v, %v", eng, err)
+	}
+	if eng.Tick != 30*time.Minute || len(eng.Humans) != 1 || len(eng.GitHub.Apps()) != 1 {
+		t.Errorf("engine %+v", eng)
 	}
 }

@@ -14,13 +14,13 @@ and a person approves anything risky.**
 
 > **Status: under construction.** The design is settled and the core is
 > built and tested: config, state store, the transition engine, stage
-> prompts and verdict schemas, and the GitHub client with a hardened
-> webhook receiver. The pieces that make it run end to end (the executor,
-> worker launcher, Claude proxy and dashboard) are still being built, so
-> chuck does not yet move real issues. Progress is tracked on
-> [issue #17](https://github.com/showmethebots/chuck/issues/17).
+> prompts and verdict schemas, the GitHub client with a hardened webhook
+> receiver, and the executor and tick that drive it. The pieces that make
+> it run end to end (worker launcher, Claude proxy and dashboard) are
+> still being built, so chuck does not yet move real issues. Progress is
+> tracked on [issue #17](https://github.com/showmethebots/chuck/issues/17).
 > Production today serves `/healthz` and stores signed GitHub webhook
-> deliveries without acting on them.
+> deliveries; the loop stays off until its secrets are set.
 
 ## Why
 
@@ -64,6 +64,8 @@ escalation, is in the
 | --- | --- | --- |
 | `internal/loop` | `Transition` is a pure function: item, config, input and gathered facts in; state changes and effects out. | Every rule is a table test. `TestPackageImportsNoIO` fails the build if the package imports a network, database or filesystem package. |
 | `internal/loop` | Risk-path hold. `chuck/loop` turns `success` only on a clean sweep or a human approval of the reviewed head. | A later, prompt-injected stage cannot merge a migration once checks go green. Approval of any other commit is ignored. |
+| `internal/engine` | The new state and its transition row are committed before any GitHub call. A failed effect leaves the item where it was committed, with the error on the row, and the tick retries it; after three failing ticks the item goes to a human. | chuck is never behind its own database, and every effect is safe to run twice: labels converge, a mention looks for its own marker, a merge re-reads the PR and never merges a head that moved. |
+| `internal/engine` | GitHub does not retry a failed webhook delivery, so every tick also replays what a lost one would have done: a human's label or approval, a merge, a deploy run. | A dropped delivery costs one tick of delay, not a stuck item. |
 | `internal/github` | Webhooks are checked against GitHub's published `hooks` IP ranges before the body is read, then by HMAC signature. For the events the loop acts on, the signed payload must also match the unsigned event header. | Layers fail closed: an empty secret rejects everything, and a captured body cannot be replayed as one of the events the loop acts on. |
 | `.github/workflows/hook-ranges.yml` | A weekly job compares the built-in IP list with GitHub's and opens an *issue*, not a PR. | Actions never gets permission to create or approve PRs, so no workflow can satisfy the human merge approval. |
 | `internal/github` | Worker tokens are minted per stage from a fixed permission set, and a token returned with any extra permission is refused. Symlinks are never followed when reading `loop.json`. | Least privilege per run, checked rather than assumed. |
@@ -97,6 +99,7 @@ documents are current and which are history.
 cmd/chuck/          entrypoint: `run` (server), `validate` (config and loop.json check)
 internal/config/    config/chuck.yaml and per-repo .claude/loop.json: strict decoding, validation
 internal/loop/      the pure Transition function, stage prompts and verdict schemas
+internal/engine/    the I/O around Transition: webhook mapping, facts, the effect executor, the tick
 internal/github/    GitHub App client, worker tokens, webhook receiver and IP allowlist
 internal/memory/    SQLite state (WAL, embedded migrations)
 internal/web/       HTTP server: /healthz, the webhook mount, heartbeat

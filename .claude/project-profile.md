@@ -38,6 +38,7 @@ make skills-check
 | `Makefile` targets | `README.md` "Development", this profile's `## Mechanical checks` |
 | `AGENTS.md` invariants, `internal/github/webhook.go` (the order and scope of the webhook checks), `internal/github/app.go` `StagePermissions`, `.github/workflows/hook-ranges.yml` | `README.md` "Design choices worth a look" |
 | Top-level and `internal/` directories, `cmd/chuck` subcommands | `README.md` "Layout" |
+| `internal/engine` (executor order, retries, escalation, replay) | `README.md` "Design choices worth a look", `AGENTS.md` invariant on committing state before effects, `config/README.md` (loop on/off and the `loop.json` kill switch) |
 | `internal/loop/types.go` states | `README.md` "The loop" diagram |
 | Current and retired specs and plans in `docs/superpowers/` | `docs/superpowers/README.md` |
 | `.github/workflows/ci.yml` checks | this profile's `## Mechanical checks` |
@@ -131,7 +132,10 @@ only costs a read slot: it does not get past the signature check. For the
 events the loop acts on, the signed payload must also match the unsigned
 `X-GitHub-Event` header, so a captured body cannot be replayed as another
 event. chuck's outbound calls are GitHub's meta endpoint
-and, once the executor lands, the GitHub API with the App's tokens. What matters is the Fly app, its
+and, once the loop is on, the GitHub API with the App's installation
+tokens: each scoped to one repository and `ChuckPermissions`, except the
+discovery token that lists an installation's repositories, which carries
+`metadata: read` and nothing else. What matters is the Fly app, its
 volume, and the Tigris bucket holding the replicated state. The control
 that guards them is credential custody. `FLY_API_TOKEN` is an app-scoped
 deploy token that only the CI `deploy` job can reach, through the
@@ -156,12 +160,17 @@ stranger's PR runs nothing until a maintainer approves it, and the
 `production` environment's deployment branches limited to `main`, so
 `FLY_API_TOKEN` is reachable only from a push to `main` even if a later
 workflow change drops the deploy job's `if:`. Text from issues and comments
-is untrusted input: chuck stores it and acts on none of it today, and once
-the loop lands only text from `humans` (by numeric id) is trusted
-(the spec's "Trusted text").
+is untrusted input. The loop acts on a delivery only through the
+transition table, which trusts a label, push or approval only from a user
+in `humans` (by numeric id, from the signed payload or, for a delivery the
+tick replays, from GitHub's own event and review records), and reads
+`chuck/loop` only from statuses chuck's App set. Comments chuck posts can
+quote a worker's words, so it defuses `@` mentions and escapes the
+hidden-marker opener in them. Prompt text is filtered in #27 (the spec's
+"Trusted text").
 
-chuck stores webhook deliveries verbatim and acts on none of them while the
-delivery loop is rebuilt. The loop's own model (GitHub App tokens scoped
+The loop is on only when every `${VAR}` in `config/chuck.yaml` resolves;
+until then deliveries are stored as handled and nothing acts on them. The loop's own model (GitHub App tokens scoped
 per worker run, the `chuck/loop` status only chuck can set, the Claude
 proxy, the `humans` allowlist for dashboard logins and trusted feedback) is
 in the spec's "Identities", "Who can merge", "The Claude proxy" and
@@ -177,6 +186,7 @@ in the spec's "Identities", "Who can merge", "The Claude proxy" and
 | `internal/github/**` | secrets, authorization, client-data |
 | `internal/memory/**` | client-data |
 | `internal/loop/**` | authorization, client-data |
+| `internal/engine/**` | authorization, client-data, secrets |
 | `cmd/**` | secrets, client-data |
 | `deploy/**` | auth-session, secrets, supply-chain |
 | `Dockerfile` | supply-chain, secrets |
@@ -203,8 +213,9 @@ by `cwinters8`, sharing one webhook secret — plus a dev App for local
 testing; all three get read-only repository permissions (Actions, Contents,
 Issues, Metadata, Pull requests). GitHub makes each App generate a private
 key before it can be installed, but the key is deleted rather than given to
-chuck, since chuck makes no GitHub API calls yet
-(`docs/phase-1-human-steps.md` section 1).
+chuck, since the loop is off and chuck makes no GitHub API calls until it
+is on (`docs/phase-1-human-steps.md` section 1; #34 gives the App its key
+and write permissions).
 Deploys authenticate to Fly with an app-scoped `FLY_API_TOKEN` deploy
 token, which is stored on the `production` GitHub environment. Litestream
 authenticates to Tigris with `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`,
@@ -218,8 +229,9 @@ Real secrets live in two places only: Fly app secrets and the GitHub
 `BUCKET_NAME` and the `AWS_*` Tigris credentials, plus
 `GITHUB_APP_WEBHOOK_SECRET` (`docs/phase-1-human-steps.md` section 1.1) and
 `ANTHROPIC_API_KEY`, which the retired shadow phase set with `fly secrets
-set` and which is kept for the loop's Claude proxy. chuck reads only the
-webhook secret today. The Slack secrets are unset by
+set` and which is kept for the loop's Claude proxy. With the loop off, chuck
+reads only the webhook secret; turning it on means setting every
+reference in `config/chuck.yaml`. The Slack secrets are unset by
 `docs/phase-1-human-steps.md` section 2. The loop's new secrets are listed
 in the delivery loop spec's "Rollout / Phase 0"; their setup steps will
 live in `docs/phase-0-human-steps.md`, which issue #34 writes and which does

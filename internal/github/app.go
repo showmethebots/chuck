@@ -259,7 +259,9 @@ func (a *App) do(ctx context.Context, auth, method, path string, body []byte, ou
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
-	req.Header.Set("Authorization", auth)
+	if auth != "" {
+		req.Header.Set("Authorization", auth)
+	}
 	req.Header.Set("User-Agent", "chuck")
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
