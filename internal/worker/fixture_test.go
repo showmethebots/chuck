@@ -55,6 +55,12 @@ type fakeAPI struct {
 	err            error
 }
 
+// fakeRepos hands out fakeAPI as chuck's App's view of the repo.
+type fakeRepos struct{ api *fakeAPI }
+
+func (f fakeRepos) Repo(memory.Repo) (engine.RepoAPI, error)     { return f.api, nil }
+func (f fakeRepos) BotID(context.Context, string) (int64, error) { return bot, nil }
+
 func (f *fakeAPI) IssueComments(_ context.Context, n int) ([]github.IssueComment, error) {
 	return f.issueComments[n], f.err
 }
@@ -156,6 +162,7 @@ func newFixture(t *testing.T) *fixture {
 		WallClockCeiling: 4 * time.Hour, Spend: config.Spend{MonthlyUSD: 100, PerRepoMonthlyUSD: 60},
 		Getenv: func(k string) string { return fx.env[k] },
 		Log:    slog.New(slog.DiscardHandler), Now: clock}
+	fx.m.Repos = fakeRepos{fx.api}
 	// Never reach api.github.com from a test.
 	fx.m.Revoke = func(_ context.Context, tok string) error {
 		fx.revMu.Lock()
@@ -219,6 +226,12 @@ func (fx *fixture) reviewed(it memory.Item, sha, url string) {
 	}
 	_ = fx.store.MarkRunRunning(fx.ctx, r.ID, fx.now)
 	v := `{"outcome":"posted","summary":"s","reviewed_sha":"` + sha + `","comment_url":"` + url + `","findings_count":1,"skills_not_run":[]}`
+	// As the run API does on accepting the verdict.
+	rv, err := loop.ParseVerdict(config.StageReview, []byte(v))
+	if err != nil {
+		fx.t.Fatal(err)
+	}
+	fx.m.snapshotFindings(fx.ctx, r, rv.Review)
 	if err := fx.store.EndRun(fx.ctx, r.ID, memory.RunEnd{Status: memory.RunFinished, VerdictJSON: v}, fx.now); err != nil {
 		fx.t.Fatal(err)
 	}

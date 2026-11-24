@@ -9,7 +9,7 @@ CREATE TABLE ignored_feedback (
 	author_id    INTEGER NOT NULL,
 	author_login TEXT NOT NULL DEFAULT '',
 	url          TEXT NOT NULL DEFAULT '',
-	-- Why it was left out: 'untrusted_author' or 'chuck_mention'.
+	-- Why it was left out: 'untrusted_author', 'chuck_mention' or 'app_comment'.
 	reason       TEXT NOT NULL CHECK (reason <> ''),
 	created_at   TEXT NOT NULL
 );

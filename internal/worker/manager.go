@@ -3,7 +3,9 @@ package worker
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -27,6 +29,13 @@ type Tokens interface {
 	WorkerToken(ctx context.Context, repo memory.Repo, stage config.Stage) (github.Token, error)
 }
 
+// Repos reads a repository as chuck's App, for what chuck checks itself
+// when it accepts a verdict. engine.AppSource implements it.
+type Repos interface {
+	Repo(r memory.Repo) (engine.RepoAPI, error)
+	BotID(ctx context.Context, appOwner string) (int64, error)
+}
+
 // Verdicts applies a run's verdict. *engine.Engine implements it.
 type Verdicts interface {
 	Verdict(ctx context.Context, v loop.VerdictInput, end memory.RunEnd) (loop.Result, error)
@@ -38,6 +47,7 @@ type Manager struct {
 	Store    *memory.Store
 	Launcher Launcher
 	Tokens   Tokens
+	Repos    Repos
 	Verdicts Verdicts // set once the engine exists
 	// URL is chuck as a worker reaches it: the base of the run API and the
 	// Claude proxy.
@@ -350,23 +360,97 @@ func (m *Manager) prepare(ctx context.Context, req engine.LaunchRequest, attempt
 			}
 		}
 		if findings != "" {
-			// Fail closed: a sweep without the findings would triage
-			// nothing and report the PR ready. And every worker's token
-			// can edit any comment the App wrote, so the findings count
-			// only as pr-review posted them, unedited.
-			i := slices.IndexFunc(cs, func(c Comment) bool {
-				return c.AuthorID == req.BotID && c.Source == SourceConversation && c.URL == findings
-			})
-			switch {
-			case i < 0:
-				return p, &engine.Escalation{Reason: "review findings: the review verdict's comment_url is not a comment of chuck's App on this PR"}
-			case cs[i].Edited:
-				return p, &engine.Escalation{Reason: "review findings: the review's comment was edited after it was posted"}
+			if err := m.checkFindings(ctx, it.ID, findings, req.BotID, cs); err != nil {
+				return p, err
 			}
 		}
 		p.context.Feedback, p.ignored = Trusted(cs, req.Humans, req.BotID, findings)
 	}
 	return p, nil
+}
+
+// checkFindings fails closed on the review's findings comment: a sweep
+// without the real findings would triage nothing and report the PR ready.
+// The comment must be chuck's App's, at the URL the review verdict
+// reported, and its body must still hash to what chuck recorded when it
+// accepted that verdict, since every worker's token can edit any comment
+// the App wrote.
+func (m *Manager) checkFindings(ctx context.Context, itemID int64, url string, bot int64, cs []Comment) error {
+	i := slices.IndexFunc(cs, func(c Comment) bool {
+		return c.AuthorID == bot && c.Source == SourceConversation && c.URL == url
+	})
+	if i < 0 {
+		return &engine.Escalation{Reason: "review findings: the review verdict's comment_url is not a comment of chuck's App on this PR"}
+	}
+	want, err := m.Store.ReviewFindingsSHA(ctx, itemID, url)
+	if errors.Is(err, memory.ErrNotFound) {
+		return &engine.Escalation{Reason: "review findings: chuck recorded no copy of the review's comment when it accepted the verdict"}
+	}
+	if err != nil {
+		return err
+	}
+	if cs[i].Edited || bodySHA(cs[i].Body) != want {
+		return &engine.Escalation{Reason: "review findings: the review's comment was edited after chuck accepted the verdict"}
+	}
+	return nil
+}
+
+// snapshotFindings records the hash of a posted review's findings comment
+// as it stands when chuck accepts the verdict, for checkFindings. It is
+// best-effort: with nothing recorded, the sweep escalates instead.
+func (m *Manager) snapshotFindings(ctx context.Context, run memory.Run, rv *loop.ReviewVerdict) {
+	if rv == nil || rv.CommentURL == "" || m.Repos == nil {
+		return
+	}
+	err := func() error {
+		it, err := m.Store.ItemByID(ctx, run.ItemID)
+		if err != nil {
+			return err
+		}
+		repo, err := m.repoByID(ctx, it.RepoID)
+		if err != nil {
+			return err
+		}
+		api, err := m.Repos.Repo(repo)
+		if err != nil {
+			return err
+		}
+		bot, err := m.Repos.BotID(ctx, repo.AppOwner)
+		if err != nil {
+			return err
+		}
+		cs, err := api.IssueComments(ctx, it.Number)
+		if err != nil {
+			return err
+		}
+		for _, c := range cs {
+			if c.User.ID == bot && c.HTMLURL == rv.CommentURL && !c.UpdatedAt.After(c.CreatedAt) {
+				return m.Store.InsertReviewFindings(ctx, run.ID, it.ID, c.HTMLURL, bodySHA(c.Body), m.now())
+			}
+		}
+		return errors.New("no unedited comment of chuck's App at the reported comment_url")
+	}()
+	if err != nil {
+		m.log().Warn("review findings not recorded; the sweep will escalate", "run", run.ID, "err", err.Error())
+	}
+}
+
+func (m *Manager) repoByID(ctx context.Context, id int64) (memory.Repo, error) {
+	rs, err := m.Store.Repos(ctx)
+	if err != nil {
+		return memory.Repo{}, err
+	}
+	for _, r := range rs {
+		if r.ID == id {
+			return r, nil
+		}
+	}
+	return memory.Repo{}, fmt.Errorf("repo %d: %w", id, memory.ErrNotFound)
+}
+
+func bodySHA(body string) string {
+	h := sha256.Sum256([]byte(body))
+	return hex.EncodeToString(h[:])
 }
 
 // findingsURL is the comment the item's last review verdict reported its

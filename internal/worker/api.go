@@ -324,6 +324,10 @@ func (m *Manager) serveVerdict(w http.ResponseWriter, r *http.Request) {
 	// A worker that hangs up mid-commit must not cut the effects list
 	// short; the commit and its effects run to the end either way.
 	ctx := context.WithoutCancel(r.Context())
+	if v.Verdict != nil && v.Verdict.Review != nil && v.Verdict.Review.Outcome == "posted" {
+		// Before the verdict commits, so the sweep it leads to finds it.
+		m.snapshotFindings(ctx, run, v.Verdict.Review)
+	}
 	if _, err := m.Verdicts.Verdict(ctx, v, end); err != nil {
 		if errors.Is(err, memory.ErrStale) {
 			refuse(w, http.StatusConflict, "the run has already ended")

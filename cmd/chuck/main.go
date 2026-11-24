@@ -269,7 +269,7 @@ func newEngine(c *config.Chuck, getenv func(string) string, store *memory.Store,
 		return nil, nil, err
 	}
 	m := &worker.Manager{
-		Store: store, Launcher: l, Tokens: src, Verdicts: eng, URL: pub,
+		Store: store, Launcher: l, Tokens: src, Repos: src, Verdicts: eng, URL: pub,
 		Image: r.Workers.Image, WallClockCeiling: r.Workers.WallClockCeiling.Std(), Spend: r.Spend,
 		Getenv: getenv, Log: log,
 	}

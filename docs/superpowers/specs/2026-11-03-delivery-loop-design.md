@@ -476,10 +476,12 @@ prompt never sees the rest:
   run posted its findings in: the App's comment at the review verdict's
   `comment_url`, when `reviewed_sha` is the head being swept. Every other
   App comment is left out, since every worker posts as the App, and build
-  gets no App text. If no App comment is at that URL, or it was edited
-  after it was posted (every worker's token can edit any App comment), the
-  sweep escalates instead of running, since a sweep without the real
-  findings would report the PR ready. Everything else is omitted from the prompt and
+  gets no App text. When chuck accepts the review verdict it records the
+  sha256 of that comment's body (`review_findings`), and sweep uses the
+  comment only while its body still hashes to that, since every worker's
+  token can edit any App comment. If the comment is missing, was edited,
+  or was never recorded, the sweep escalates instead of running, since a
+  sweep without the real findings would report the PR ready. Everything else is omitted from the prompt and
   listed on the item page as "ignored feedback" with the author.
 - `issues.labeled`, `pull_request.labeled` and `pull_request.synchronize`
   transition only when the sender is in `humans`, as the table says.

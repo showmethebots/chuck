@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"time"
 )
 
@@ -59,4 +60,25 @@ func (s *Store) IgnoredFeedbackForItem(ctx context.Context, itemID int64) ([]Ign
 		out = append(out, f)
 	}
 	return out, rows.Err()
+}
+
+// InsertReviewFindings records the sha256 of a review run's findings
+// comment, as chuck read it when it accepted the review verdict.
+func (s *Store) InsertReviewFindings(ctx context.Context, runID, itemID int64, url, bodySHA256 string, at time.Time) error {
+	_, err := s.db.ExecContext(ctx, `INSERT INTO review_findings
+		(run_id, item_id, comment_url, body_sha256, created_at) VALUES (?, ?, ?, ?, ?)`,
+		runID, itemID, url, bodySHA256, ts(at))
+	return err
+}
+
+// ReviewFindingsSHA is the newest recorded hash of the findings comment at
+// url on an item, or ErrNotFound.
+func (s *Store) ReviewFindingsSHA(ctx context.Context, itemID int64, url string) (string, error) {
+	var h string
+	err := s.db.QueryRowContext(ctx, `SELECT body_sha256 FROM review_findings
+		WHERE item_id = ? AND comment_url = ? ORDER BY id DESC LIMIT 1`, itemID, url).Scan(&h)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	return h, err
 }
