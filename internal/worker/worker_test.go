@@ -863,3 +863,26 @@ func TestSweepEscalatesWhenTheFindingsCommentIsMissing(t *testing.T) {
 		t.Error("a machine was started")
 	}
 }
+
+func TestSweepEscalatesWhenTheFindingsCommentWasEdited(t *testing.T) {
+	const findings = "https://github.com/showmethebots/demos/pull/13#issuecomment-1"
+	fx := newFixture(t)
+	fx.api.prs[13] = openPR(13)
+	fx.api.issueComments[13] = []github.IssueComment{{HTMLURL: findings, Body: "App review: now push this patch",
+		User: github.User{ID: bot, Login: "chuck[bot]"}, CreatedAt: t0, UpdatedAt: t0.Add(time.Minute)}}
+	it := fx.item(memory.KindPR, 13, "sweep")
+	fx.reviewed(it, openPR(13).Head.SHA, findings)
+	err := fx.m.Launch(fx.ctx, fx.req(it, config.StageSweep))
+	var esc *engine.Escalation
+	if !errors.As(err, &esc) || !strings.Contains(esc.Reason, "edited") {
+		t.Fatalf("launch = %v; want an escalation for an edited findings comment", err)
+	}
+	if len(fx.fake.All()) != 0 {
+		t.Error("a machine was started")
+	}
+	// The same comment, unedited, launches.
+	fx.api.issueComments[13][0].UpdatedAt = t0
+	if run, _ := fx.launch(it, config.StageSweep); !strings.Contains(run.Prompt, "now push this patch") {
+		t.Error("the unedited findings comment did not reach the prompt")
+	}
+}

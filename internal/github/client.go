@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 )
 
 // Client makes chuck's own calls on one repository, with a token scoped
@@ -191,10 +192,12 @@ func (c *Client) GetIssue(ctx context.Context, number int) (Issue, error) {
 
 // IssueComment is one comment, with its author for the trusted-text filter.
 type IssueComment struct {
-	ID      int64  `json:"id"`
-	HTMLURL string `json:"html_url"`
-	Body    string `json:"body"`
-	User    User   `json:"user"`
+	ID        int64     `json:"id"`
+	HTMLURL   string    `json:"html_url"`
+	Body      string    `json:"body"`
+	User      User      `json:"user"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // IssueComments lists an issue's or PR's comments, oldest first.

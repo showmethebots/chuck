@@ -349,12 +349,20 @@ func (m *Manager) prepare(ctx context.Context, req engine.LaunchRequest, attempt
 				return p, err
 			}
 		}
-		if findings != "" && !slices.ContainsFunc(cs, func(c Comment) bool {
-			return c.AuthorID == req.BotID && c.Source == SourceConversation && c.URL == findings
-		}) {
+		if findings != "" {
 			// Fail closed: a sweep without the findings would triage
-			// nothing and report the PR ready.
-			return p, &engine.Escalation{Reason: "review findings: the review verdict's comment_url is not a comment of chuck's App on this PR"}
+			// nothing and report the PR ready. And every worker's token
+			// can edit any comment the App wrote, so the findings count
+			// only as pr-review posted them, unedited.
+			i := slices.IndexFunc(cs, func(c Comment) bool {
+				return c.AuthorID == req.BotID && c.Source == SourceConversation && c.URL == findings
+			})
+			switch {
+			case i < 0:
+				return p, &engine.Escalation{Reason: "review findings: the review verdict's comment_url is not a comment of chuck's App on this PR"}
+			case cs[i].Edited:
+				return p, &engine.Escalation{Reason: "review findings: the review's comment was edited after it was posted"}
+			}
 		}
 		p.context.Feedback, p.ignored = Trusted(cs, req.Humans, req.BotID, findings)
 	}

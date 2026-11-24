@@ -38,6 +38,7 @@ type Comment struct {
 	Body        string
 	Source      string
 	CommitID    string // reviews and inline comments: the commit they were left on
+	Edited      bool   // conversation comments: changed since it was posted
 }
 
 // Trusted splits feedback into what may reach a prompt and what is
@@ -92,7 +93,8 @@ func comments(ctx context.Context, api engine.RepoAPI, kind string, number int) 
 		return nil, err
 	}
 	for _, c := range ics {
-		out = append(out, Comment{AuthorID: c.User.ID, AuthorLogin: c.User.Login, URL: c.HTMLURL, Body: c.Body, Source: SourceConversation})
+		out = append(out, Comment{AuthorID: c.User.ID, AuthorLogin: c.User.Login, URL: c.HTMLURL, Body: c.Body,
+			Source: SourceConversation, Edited: c.UpdatedAt.After(c.CreatedAt)})
 	}
 	if kind != memory.KindPR {
 		return out, nil
